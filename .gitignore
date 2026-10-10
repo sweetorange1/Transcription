@@ -1,0 +1,39 @@
+# 构建产物（Ninja / Visual Studio CMake 构建目录）
+/cmake-build-*/
+/build/
+/dist/
+
+# 构建日志
+/build.log
+/build-console.log
+
+# IDE
+.idea/
+.vscode/
+.vs/
+
+# AI 开发辅助（含本地环境路径，不入库）
+.codebuddy/
+.codewiki/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 二进制产物
+*.exe
+*.vst3
+*.component
+*.dylib
+*.app
+*.pkg
+*.dmg
+*.pdb
+*.lib
+*.exp
+
+# 临时文件
+*.log
+*.tmp
+*.user
+CMakeUserPresets.json

@@ -1,6 +1,6 @@
 # Transcription · 生物化学 — 转录
 
-理科系列 03，版本 1.0.1。独立 JUCE 8.0.12 / C++17 噪声减法合成器；不修改 Organic Chemistry 或 Entropy。
+理科系列 03，版本 1.0.4。独立 JUCE 8.0.12 / C++17 噪声减法合成器；不修改 Organic Chemistry 或 Entropy。
 
 ## 构建与试用
 

@@ -56,7 +56,8 @@ struct EnvelopeShape
     float release = 0.45f;
 };
 
-// 终止密码子决定音色姿态：UAG Amber=pluck、UAA Ochre=pad、UGA Opal=lead。
+// 终止密码子决定音色姿态与 body 效果链拓扑：
+// UAG Amber=pluck（Spore 孢子链）、UAA Ochre=pad（Nebula 星云链）、UGA Opal=lead（Voice 声腔链）。
 enum class StopKind : int { pluck = 0, pad = 1, lead = 2 };
 
 // 转录结果：分段（core/body/stop）+ key1/key2 映射后的 DSP 参数 + 终止 ADSR。
@@ -69,7 +70,7 @@ struct Transcript
 
     // key1 → 减法核心
     float coreResonance = 0.5f;
-    int coreHarmonics = 16;
+    int coreHarmonics = 6;
     float coreCutoff = 8000.0f;
     float coreSlope = 12.0f;
     float coreFormant = 1200.0f;
@@ -77,13 +78,14 @@ struct Transcript
     float coreOddEven = 0.0f;
     float coreDrive = 0.0f;
 
-    // key2 → 效果器组
-    float fxDrive = 0.0f;
-    float fxDepth = 0.0f;
-    float fxTime = 0.0f;
-    float fxFeedback = 0.0f;
-    float fxSize = 0.0f;
-    float fxDamp = 0.0f;
+    // key2 → body 效果链性状（链的拓扑由 stopKind 选择，见 Dsp/BodyFx.*）
+    float fxGrowth = 0.0f;             // 生长度 [0,1]：body 长度 → 湿度 / 回授 / 尾音
+    float fxSpace = 0.5f;              // 空间 [0,1]：GC 含量（热稳定性）→ 空间尺寸与衰减
+    float fxMotion = 0.5f;             // 律动 [0,1]：极性残基 + 甘氨酸 → 调制深度
+    float fxBreath = 0.5f;             // 呼吸 [0,1]：疏水残基 → 呼吸 / 漂移速率
+    float fxTone = 0.0f;               // 色泽 [-1,1]：酸性(+) 明亮 / 碱性(−) 温暖
+    float fxShimmer = 0.0f;            // 微光 [0,1]：芳香 / 环状残基（F W Y H P）→ 八度光晕
+    std::uint32_t fxSeed = 1;          // body 序列哈希 → 每条基因独特的漂移性格
 
     float normalisation = 1.0f;        // 静态响度归一化系数
 };

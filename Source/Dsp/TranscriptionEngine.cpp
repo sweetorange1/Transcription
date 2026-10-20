@@ -39,10 +39,14 @@ float Engine::Voice::nextEnvelope() noexcept
     }
     return envelope;
 }
-float Engine::Voice::whiteNoise() noexcept
+float Engine::Voice::noise() noexcept
 {
     random ^= random << 13; random ^= random >> 17; random ^= random << 5;
-    return static_cast<float>(random >> 8) / 8388608.0f - 1.0f;
+    const float white = static_cast<float>(random >> 8) / 8388608.0f - 1.0f;
+    // 一阶泄漏积分 → 布朗噪声（-6 dB/oct）。极点 0.995 在 48 kHz 下约 38 Hz 转折，
+    // 既保留低频堆积，又不会让次声漂移；输出再归一化到接近原白噪声的 RMS。
+    brown = brown * 0.995f + white * 0.05f;
+    return std::clamp(brown * 1.5f, -1.0f, 1.0f);
 }
 void Engine::Voice::release() noexcept
 {
@@ -59,13 +63,15 @@ void Engine::prepare(double rate) noexcept
     agcAttack = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.2)));
     agcRelease = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.2)));   // 对称慢速，追踪平均能量而非窄带峰值
     agcSmooth = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.05)));
-    for (auto& voice : voices) { voice.core.prepare(sampleRate); voice.fx.prepare(sampleRate); }
+    for (auto& voice : voices) voice.core.prepare(sampleRate);
+    body.prepare(sampleRate);
     reset();
 }
 void Engine::reset() noexcept
 {
     voices = {};
-    for (auto& voice : voices) { voice.core.reset(); voice.fx.reset(); }
+    for (auto& voice : voices) voice.core.prepare(sampleRate);
+    body.reset();
     pedal.fill(false); bend.fill(0.0f); wheel.fill(0.0f);
     volume.fill(1.0f); expression.fill(1.0f);
     dcInput.fill(0.0f); dcOutput.fill(0.0f);
@@ -76,6 +82,7 @@ void Engine::reset() noexcept
 void Engine::setTranscript(const Transcript& next) noexcept
 {
     transcript = next;
+    body.configure(transcript);
     refreshCountdown = 0;
 }
 void Engine::setScanPhase(float phase) noexcept
@@ -102,18 +109,10 @@ void Engine::refresh(Voice& voice, bool snap) noexcept
     core.formantAmt = transcript.coreFormantAmt;
     core.oddEven = transcript.coreOddEven;
     core.drive = transcript.coreDrive;
-    voice.core.setParameters(sampleRate, voice.f0, core);
+    // snap 只在 noteOn 时为 true：新音符必须从正确的带通系数起步（见 SubtractiveCore::setParameters）。
+    voice.core.setParameters(sampleRate, voice.f0, core, snap);
 
-    FxParams fx;
-    fx.drive = transcript.fxDrive;
-    fx.depth = transcript.fxDepth;
-    fx.time = transcript.fxTime;
-    fx.feedback = transcript.fxFeedback;
-    fx.size = transcript.fxSize;
-    fx.damp = transcript.fxDamp;
-    voice.fx.setParameters(fx);
-
-    // 激活调度：核心 4 级 ∈ [0, coreCount/M]，FX 4 级 ∈ [coreCount/M, 1]。
+    // 激活调度：核心 4 级 ∈ [0, coreCount/M]（body 效果链 4 级见 updateBodyActivation）。
     const int M = transcript.coreCount + transcript.bodyCount;
     const float coreWindow = M > 0 ? static_cast<float>(transcript.coreCount) / static_cast<float>(M) : 0.0f;
     if (transcript.coreCount > 0)
@@ -126,18 +125,34 @@ void Engine::refresh(Voice& voice, bool snap) noexcept
         }
     }
     else voice.coreActivation.fill(0.0f);
-    if (transcript.bodyCount > 0)
-    {
-        for (int k = 0; k < 4; ++k)
-        {
-            const float start = coreWindow + (1.0f - coreWindow) * static_cast<float>(k) / 4.0f;
-            const float end = coreWindow + (1.0f - coreWindow) * static_cast<float>(k + 1) / 4.0f;
-            voice.fxActivation[static_cast<size_t>(k)] = smoothstep(start, end, scanPhase);
-        }
-    }
-    else voice.fxActivation.fill(0.0f);
 
     if (snap) voice.channelGain = voice.targetChannelGain;
+}
+void Engine::updateBodyActivation() noexcept
+{
+    // 效果器完全按“密码子位置”推进，而不是按 core/body 比例：
+    //   第 4 个密码子（1 起算，C[3]）= 0，终止密码子（C[N-1]）= 1。
+    // 四级激活与整体湿音共用同一条位置轴，因此到终止密码子时两者同时到 1，
+    // 不会出现“读完前几个密码子效果就到位”，也不会拖到转录结束之后才满。
+    fx::Activation activation {};
+    float wet = 1.0f;
+    if (transcript.bodyCount > 0)
+    {
+        const int codons = transcript.coreCount + transcript.bodyCount + 2;
+        constexpr float firstWetCodon = 3.0f;                       // C[3] = 第 4 个密码子
+        const float lastWetCodon = std::max(firstWetCodon + 1.0f, static_cast<float>(codons - 1));
+        const float position = scanPhase * static_cast<float>(codons);
+        const float span = lastWetCodon - firstWetCodon;
+        for (int k = 0; k < 4; ++k)
+        {
+            const float start = firstWetCodon + span * static_cast<float>(k) / 4.0f;
+            const float end = firstWetCodon + span * static_cast<float>(k + 1) / 4.0f;
+            activation[static_cast<size_t>(k)] = smoothstep(start, end, position);
+        }
+        wet = smoothstep(firstWetCodon, lastWetCodon, position);
+    }
+    body.setActivation(activation);
+    body.setWet(wet);
 }
 void Engine::noteOn(int channel, int note, float velocity) noexcept
 {
@@ -160,7 +175,7 @@ void Engine::noteOn(int channel, int note, float velocity) noexcept
     const bool stealing = chosen->stage != Stage::idle;
     const float oldL = chosen->lastL, oldR = chosen->lastR;
     *chosen = Voice {};
-    chosen->core.prepare(sampleRate); chosen->fx.prepare(sampleRate);
+    chosen->core.prepare(sampleRate);
     chosen->channel = channel - 1; chosen->note = note; chosen->keyDown = true;
     chosen->age = ++serial;
     chosen->random = 0x9e3779b9u ^ static_cast<std::uint32_t>(serial * 747796405u) ^ static_cast<std::uint32_t>(note * 2891336453u);
@@ -207,9 +222,10 @@ void Engine::controller(int channel, int number, int value) noexcept
             if (voice.channel == channel - 1)
             {
                 voice.keyDown = false;
-                if (number == 120) { voice = Voice {}; voice.core.prepare(sampleRate); voice.fx.prepare(sampleRate); }
+                if (number == 120) { voice = Voice {}; voice.core.prepare(sampleRate); }
                 else if (!pedal[ch]) voice.release();
             }
+    if (number == 120) body.reset();   // All Sound Off 同时切断效果总线尾音
     refreshCountdown = 0;
 }
 float Engine::limit(float sample) noexcept
@@ -228,6 +244,7 @@ void Engine::render(float* left, float* right, int samples) noexcept
         if (refreshCountdown <= 0)
         {
             for (auto& voice : voices) if (voice.stage != Stage::idle) refresh(voice, false);
+            updateBodyActivation();
             refreshCountdown = 64;
         }
         --refreshCountdown;
@@ -237,13 +254,12 @@ void Engine::render(float* left, float* right, int samples) noexcept
         {
             if (voice.stage == Stage::idle) continue;
             anySignal = true;
-            const float noise = voice.whiteNoise();
+            const float noise = voice.noise();
             const float envelope = voice.nextEnvelope() * voice.velocity;
             float mono = voice.core.process(noise, voice.coreActivation);
-            // 振幅包络必须先于效果器组应用：delay/混响的回声缓冲里写的是「包络之后」的信号，
-            // 否则 slow-attack 的 pad 音色虽然把干音音头衰减了，回声里仍会残留未加包络的瞬态音头。
+            // 振幅包络先于 body 效果总线：回声/混响缓冲里只写入「包络之后」的信号，
+            // slow-attack 的 pad 不会在尾音里残留未加包络的瞬态音头。
             mono *= envelope;
-            mono = voice.fx.process(mono, voice.fxActivation);
             mono *= transcript.normalisation;
             voice.channelGain += (voice.targetChannelGain - voice.channelGain) * smoothing;
             const float v = mono * voice.channelGain;
@@ -273,6 +289,8 @@ void Engine::render(float* left, float* right, int samples) noexcept
             autoGain += (1.0f - autoGain) * agcSmooth;
         }
         l *= autoGain; r *= autoGain;
+        // body 效果总线：AGC 只对齐干声能量，尾音不受 AGC 的静音回落影响；三条链各自做等功率湿干混合。
+        body.process(l, r);
         // DC 去除与软限幅。
         const std::array<float, 2> raw { l, r };
         for (size_t ch = 0; ch < 2; ++ch)

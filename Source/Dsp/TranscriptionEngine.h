@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Genome.h"
 #include "Dsp/SubtractiveCore.h"
-#include "Dsp/FxChain.h"
+#include "Dsp/BodyFx.h"
 #include <array>
 #include <cstdint>
 
@@ -42,28 +42,29 @@ private:
     struct Voice
     {
         SubtractiveCore core;
-        FxChain fx;
         Stage stage = Stage::idle;
         int channel = 0, note = 60;
         bool keyDown = false;
         std::uint64_t age = 0;
         std::uint32_t random = 1;
+        float brown = 0.0f;              // 布朗噪声积分器状态（每个声部独立，noteOn 时清零）
         float velocity = 0.0f, envelope = 0.0f;
         float attackStep = 0.01f, decayMultiplier = 0.999f, releaseMultiplier = 0.999f;
         float sustain = 0.7f, channelGain = 1.0f, targetChannelGain = 1.0f;
         float f0 = 440.0f;
         std::array<float, 4> coreActivation { 0.0f, 0.0f, 0.0f, 0.0f };
-        std::array<float, 4> fxActivation { 0.0f, 0.0f, 0.0f, 0.0f };
         float lastL = 0.0f, lastR = 0.0f, stolenL = 0.0f, stolenR = 0.0f;
         int stealRemaining = 0;
         float nextEnvelope() noexcept;
-        float whiteNoise() noexcept;
+        float noise() noexcept;
         void release() noexcept;
     };
     void refresh(Voice& voice, bool snap) noexcept;
+    void updateBodyActivation() noexcept;
     static float limit(float sample) noexcept;
     Transcript transcript;
     std::array<Voice, voiceCount> voices {};
+    BodyFx body;                    // body 区效果总线（全局立体声，一份；拓扑由终止密码子决定）
     std::array<bool, 16> pedal {};
     std::array<float, 16> bend {}, wheel {}, volume {}, expression {};
     double sampleRate = 44100.0;

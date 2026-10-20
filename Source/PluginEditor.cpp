@@ -367,6 +367,13 @@ void TranscriptionAudioProcessorEditor::timerCallback()
     preset.setButtonText(juce::String::fromUTF8(current >= 0 ? factoryPresets()[static_cast<size_t>(current)].name : "Custom fragment"));
     preset.setTooltip(juce::String::fromUTF8(current >= 0 ? factoryPresets()[static_cast<size_t>(current)].source : "Choose a gene fragment"));
     canvas.advance(delta);
+    canvas.setOutputLevel(processor.outputPeak());
+    {
+        std::array<float, transcription::spectrumBandCount> bands {};
+        for (int i = 0; i < transcription::spectrumBandCount; ++i)
+            bands[static_cast<size_t>(i)] = processor.spectrumBandDb(i);
+        canvas.setSpectrum(bands);
+    }
     processor.scanPhase.store(canvas.scanPhase(), std::memory_order_relaxed);
     repaint();
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "Model/Genome.h"
+#include "Spectrum.h"
 #include <functional>
 
 class GeneCanvas final : public juce::Component, public juce::SettableTooltipClient
@@ -17,6 +18,10 @@ public:
     void pause() noexcept { running = false; }
     void resetProcess();
     void advance(double seconds);
+    // 实际输出峰值（0..1），只用于让信号带与频谱监视器的亮度跟随真实发声。
+    void setOutputLevel(float level) noexcept { outputLevel = juce::jlimit(0.0f, 1.0f, level); }
+    // 实时输出频谱（dB，对数频段），由编辑器 30 Hz 定时器从 Processor 拉取。
+    void setSpectrum(const std::array<float, transcription::spectrumBandCount>& decibels) noexcept;
     void seek(float progress);
     Phase phase() const noexcept;
     bool isRunning() const noexcept { return running; }
@@ -56,10 +61,15 @@ private:
     void drawPolymerase(juce::Graphics&);
     void drawRna(juce::Graphics&);
     void drawCodons(juce::Graphics&);
-    void drawSpectrum(juce::Graphics&);
+    void drawSignalFlow(juce::Graphics&);
+    void drawSpectrumMonitor(juce::Graphics&);
     transcription::Genome genome;
     double elapsed = 0.0, ambientTime = 0.0;
     float scroll = 0.0f, dragStartWorldX = 0.0f, detachX = 0.0f;
+    float outputLevel = 0.0f, smoothedLevel = 0.0f;
+    std::array<float, transcription::spectrumBandCount> spectrumDb {}, spectrumDisplay {}, spectrumPeak {};
+    std::array<int, transcription::spectrumBandCount> spectrumHoldFrames {};
+    bool hasSpectrum = false;
     juce::Point<float> dragStart;
     juce::Point<float> codonDragStart;
     float codonScrollStart = 0.0f;

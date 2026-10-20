@@ -91,11 +91,11 @@ void SubtractiveCore::reset() noexcept
     tilt = Biquad {}; formant = Biquad {};
     gains.fill(0.0f);
 }
-void SubtractiveCore::setParameters(double rate, float f0, const CoreParams& params) noexcept
+void SubtractiveCore::setParameters(double rate, float f0, const CoreParams& params, bool snap) noexcept
 {
     sampleRate = std::isfinite(rate) && rate >= 8000.0 && rate <= 384000.0 ? rate : 44100.0;
     smoothing = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.004)));
-    harmonicCount = std::clamp(params.harmonics, 1, 32);
+    harmonicCount = std::clamp(params.harmonics, 1, maxHarmonics);
     drive = std::clamp(params.drive, 0.0f, 1.0f);
 
     // 谐振组：谐波 k（1..32）的频率 = f0*k，Q 由 resonance 决定，增益随谐波衰减并叠加奇偶偏置。
@@ -103,7 +103,7 @@ void SubtractiveCore::setParameters(double rate, float f0, const CoreParams& par
     const float tiltExp = std::clamp(params.slope / 6.0f - 1.0f, 0.0f, 3.0f);
     const float bias = std::clamp(params.oddEven, -1.0f, 1.0f);
     float energy = 0.0f;
-    for (int k = 1; k <= 32; ++k)
+    for (int k = 1; k <= maxHarmonics; ++k)
     {
         const bool active = k <= harmonicCount;
         const float base = active ? static_cast<float>(1.0 / std::pow(static_cast<double>(k), tiltExp)) : 0.0f;
@@ -123,10 +123,21 @@ void SubtractiveCore::setParameters(double rate, float f0, const CoreParams& par
     tilt.lowpass(sampleRate, std::clamp(params.cutoff, 20.0f, 20000.0f), 0.7071);
     const float amt = std::clamp(params.formantAmt, 0.0f, 1.0f);
     formant.peak(sampleRate, std::clamp(params.formant, 80.0f, 8000.0f), 6.0, amt * 18.0);
+
+    // 新音符起音：直接把目标系数写入当前系数。否则 biquad 会从 reset() 的
+    // 恒等直通（b0 = 1）用 4 ms 时间常数慢慢收敛到窄带通，而这期间 gains[]
+    // 已按带通带宽归一化（约 100 倍的增益），谐振组会把原始白噪声一次性
+    // 放大出 +20 dB 左右的宽带起音突发。
+    if (snap)
+    {
+        for (auto& r : resonators) r.snap();
+        tilt.snap();
+        formant.snap();
+    }
 }
 float SubtractiveCore::process(float input, const std::array<float, 4>& activation) noexcept
 {
-    // 级1：谐波谐振组（32 路带通求和）。
+    // 级1：谐波谐振组（8 路带通求和）。
     float resonance = 0.0f;
     for (int k = 0; k < harmonicCount; ++k)
         resonance += resonators[static_cast<size_t>(k)].tick(input, smoothing) * gains[static_cast<size_t>(k)];

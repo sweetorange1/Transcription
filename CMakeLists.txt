@@ -3,7 +3,7 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "macOS architectures")
 endif()
-project(Transcription VERSION 1.0.4 LANGUAGES C CXX)
+project(Transcription VERSION 1.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -14,7 +14,7 @@ option(TRANSCRIPTION_COPY_PLUGIN_AFTER_BUILD "Install plugins after building" OF
 
 add_library(TranscriptionDSP STATIC
     Source/Model/Genome.cpp Source/Presets.cpp Source/Dsp/TranscriptionEngine.cpp
-    Source/Dsp/SubtractiveCore.cpp Source/Dsp/FxChain.cpp)
+    Source/Dsp/SubtractiveCore.cpp Source/Dsp/FxBlocks.cpp Source/Dsp/BodyFx.cpp)
 target_include_directories(TranscriptionDSP PUBLIC Source)
 set_target_properties(TranscriptionDSP PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
@@ -57,10 +57,11 @@ if(TRANSCRIPTION_BUILD_PLUGIN)
         Source/PluginProcessor.cpp Source/PluginProcessor.h
         Source/PluginEditor.cpp Source/PluginEditor.h
         Source/UI/GeneCanvas.cpp Source/UI/GeneCanvas.h
+        Source/Spectrum.h
         Source/UI/ScientificLookAndFeel.h)
     target_compile_definitions(Transcription PUBLIC
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
-    target_link_libraries(Transcription PRIVATE TranscriptionDSP juce::juce_audio_utils
+    target_link_libraries(Transcription PRIVATE TranscriptionDSP juce::juce_audio_utils juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
     if(MSVC)
         target_compile_options(Transcription PRIVATE /utf-8)

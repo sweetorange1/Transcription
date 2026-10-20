@@ -238,7 +238,11 @@ Transcript transcribe(const Genome& genome) noexcept
         const float meanQ = qSum / c, meanSlope = slopeSum / c, meanGain = gainSum / c;
         const float meanOdd = oddSum / c, meanEven = evenSum / c;
         result.coreResonance = std::clamp(meanQ / 390.0f, 0.0f, 1.0f);
-        result.coreHarmonics = static_cast<int>(std::lround(std::clamp(32.0f * (2.0f - meanSlope) / 1.5f, 4.0f, 32.0f)));
+        // 8 路带通并联，映射刻意向“少谐波”偏置：以 (2−slope)/1.5 为 0..1 的归一化量，
+        // 取 4.5 次幂后放大到 1..8。平均 slope 0.9（随机组合的中心）约得 2 路；
+        // 只有 average slope 很低（多为 Tyr/Asp/Glu）时才升到 6–8 路，Gly 这类高 slope 稳定落到 1 路。
+        const float normalized = std::clamp((2.0f - meanSlope) / 1.5f, 0.0f, 1.0f);
+        result.coreHarmonics = static_cast<int>(std::lround(std::clamp(8.0f * std::pow(normalized, 4.5f), 1.0f, 8.0f)));
         result.coreCutoff = cutoffSum / c * (0.8f + 0.4f * meanGain);
         result.coreSlope = std::clamp(6.0f + meanSlope * 6.0f, 6.0f, 24.0f);
         result.coreFormant = formantSum / c;
@@ -248,9 +252,10 @@ Transcript transcribe(const Genome& genome) noexcept
         result.coreDrive = static_cast<float>(chargedCount) / c;
     }
 
-    // ---- key2：中间区 C[4 .. N-2] 的统计量 ----
+    // ---- key2：中间区 C[4 .. N-2] → body 效果链性状（拓扑由终止密码子决定） ----
     const int bodyStart = 4, bodyEnd = n - 1;
-    int bodyGc = 0, bodyBases = 0, bodyPolar = 0, bodyCharged = 0, bodyHydro = 0;
+    int bodyGc = 0, bodyBases = 0, bodyPolar = 0, bodyHydro = 0, bodyAcidic = 0, bodyBasic = 0, bodyRing = 0, bodyGly = 0;
+    std::uint32_t hash = 2166136261u;   // FNV-1a
     for (int i = bodyStart; i < bodyEnd; ++i)
     {
         const int off = i * 3;
@@ -259,20 +264,32 @@ Transcript transcribe(const Genome& genome) noexcept
             const char base = genome.bases[static_cast<size_t>(off + j)];
             if (base == 'C' || base == 'G') ++bodyGc;
             ++bodyBases;
+            hash = (hash ^ static_cast<std::uint32_t>(static_cast<unsigned char>(base))) * 16777619u;
         }
         const char aa = translate(genome.bases[static_cast<size_t>(off)], genome.bases[static_cast<size_t>(off + 1)], genome.bases[static_cast<size_t>(off + 2)]);
         const auto& r = residueInfo(aa);
         if (r.family == Family::polar) ++bodyPolar;
-        if (r.family == Family::acidic || r.family == Family::basic) ++bodyCharged;
         if (r.family == Family::hydrophobic) ++bodyHydro;
+        if (r.family == Family::acidic) ++bodyAcidic;
+        if (r.family == Family::basic) ++bodyBasic;
+        if (aa == 'F' || aa == 'W' || aa == 'Y' || aa == 'H' || aa == 'P') ++bodyRing;
+        if (aa == 'G') ++bodyGly;
     }
     const int L = result.bodyCount;
-    result.fxTime = std::clamp(0.05f + static_cast<float>(L) * 0.02f, 0.0f, 1.0f);
-    result.fxFeedback = std::clamp(0.1f + static_cast<float>(L) * 0.03f, 0.0f, 0.9f);
-    result.fxSize = bodyBases > 0 ? static_cast<float>(bodyGc) / static_cast<float>(bodyBases) : 0.0f;
-    result.fxDamp = L > 0 ? static_cast<float>(bodyHydro) / static_cast<float>(L) : 0.0f;
-    result.fxDepth = L > 0 ? static_cast<float>(bodyPolar) / static_cast<float>(L) : 0.0f;
-    result.fxDrive = L > 0 ? static_cast<float>(bodyCharged) / static_cast<float>(L) : 0.0f;
+    if (L > 0)
+    {
+        const float len = static_cast<float>(L);
+        // 生长度：L=1 → 0.15，L=6 → 0.63，L=27（满序列）→ 0.99；饱和曲线，短 body 也立即可听。
+        result.fxGrowth = 1.0f - std::exp(-len / 6.0f);
+        // GC 含量 25%..75% 映射到 0..1（GC 越高双链越稳定 → 空间越大、尾音越长）。
+        const float gc = static_cast<float>(bodyGc) / static_cast<float>(std::max(1, bodyBases));
+        result.fxSpace = std::clamp((gc - 0.25f) / 0.5f, 0.0f, 1.0f);
+        result.fxMotion = std::clamp((static_cast<float>(bodyPolar) + 0.5f * static_cast<float>(bodyGly)) / len / 0.6f, 0.0f, 1.0f);
+        result.fxBreath = std::clamp(static_cast<float>(bodyHydro) / len / 0.7f, 0.0f, 1.0f);
+        result.fxTone = std::clamp(3.0f * static_cast<float>(bodyAcidic - bodyBasic) / len, -1.0f, 1.0f);
+        result.fxShimmer = std::clamp(static_cast<float>(bodyRing) / len / 0.35f, 0.0f, 1.0f);
+        result.fxSeed = hash == 0 ? 1u : hash;
+    }
 
     // 静态归一化：谐振组已在能量守恒下输出，这里保持中性，残余差异交给慢速 AGC 微调。
     result.normalisation = 1.0f;

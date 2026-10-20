@@ -1,7 +1,9 @@
 #pragma once
 #include <JuceHeader.h>
+#include <juce_dsp/juce_dsp.h>
 #include "Parameters.h"
 #include "Presets.h"
+#include "Spectrum.h"
 
 class TranscriptionAudioProcessor final : public juce::AudioProcessor
 {
@@ -39,6 +41,13 @@ public:
     std::uint32_t revision() const noexcept { return modelRevision.load(); }
     float outputPeak() const noexcept { return meter.load(); }
     int soundingVoices() const noexcept { return voiceMeter.load(); }
+    // 实时输出频谱：对数频段、dB（spectrumMinDb..spectrumMaxDb），由音频线程写入。
+    float spectrumBandDb(int index) const noexcept
+    {
+        return index >= 0 && index < transcription::spectrumBandCount
+            ? spectrumBands[static_cast<size_t>(index)].load(std::memory_order_relaxed)
+            : transcription::spectrumMinDb;
+    }
     juce::AudioProcessorValueTreeState parameters;
     juce::MidiKeyboardState keyboardState;
     std::atomic<int> editorWidth { 820 }, editorTab { 0 };
@@ -46,6 +55,7 @@ public:
 
 private:
     void handleMidi(const juce::MidiMessage& message) noexcept;
+    void analyseSpectrum(const float* left, const float* right, int samples) noexcept;
     transcription::ParameterRefs parameterRefs;
     mutable juce::CriticalSection modelMutex;
     transcription::Genome genome, audioGenome;
@@ -55,5 +65,17 @@ private:
     std::atomic<std::uint32_t> modelRevision { 0 };
     std::atomic<int> lastPreset { 0 }, voiceMeter { 0 };
     std::atomic<float> meter { 0.0f };
+
+    // 频谱分析：4096 点 Hann 窗 FFT（Δf≈11.7 Hz @48k），每 512 采样计算一次，压成 96 个对数频段。
+    static constexpr int spectrumFftOrder = 12;
+    static constexpr int spectrumFftSize = 1 << spectrumFftOrder;
+    static constexpr int spectrumHopSamples = 512;
+    juce::dsp::FFT spectrumFft { spectrumFftOrder };
+    std::array<float, spectrumFftSize> spectrumWindow {};
+    std::array<float, spectrumFftSize * 2> spectrumBuffer {};
+    std::array<float, spectrumFftSize> spectrumRing {};
+    std::array<std::atomic<float>, transcription::spectrumBandCount> spectrumBands {};
+    std::array<float, transcription::spectrumBandCount> spectrumSmoothed {};
+    int spectrumWrite = 0, spectrumHop = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TranscriptionAudioProcessor)
 };

@@ -348,6 +348,26 @@ bool snapshot(const juce::File& file, int mode)
 {
     TranscriptionAudioProcessor processor;
     if (mode == 6) processor.loadPreset(0);   // 长序列（Central Dogma）：验证 DNA 链变长后的滚动与端点标记
+    if (mode == 7)   // 塑形中间态：core=3、body=1，停在核心窗口内，噪声与谐波同屏
+    {
+        transcription::Genome gene;
+        transcription::Genome::parse("ATG GGT GCT GTT CTT TAA", gene);
+        processor.setGenome(gene);
+    }
+    if (mode == 8 || mode == 9)   // 实时频谱：真实渲染一段音频，让 FFT 拿到稳定的谐波峰
+    {
+        processor.loadPreset(mode == 8 ? 0 : transcription::presetCount - 1);   // 9 = Start + Stop，纯噪声
+        processor.prepareToPlay(48000.0, 512);
+        juce::AudioBuffer<float> buffer(2, 512);
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 69, 0.9f), 0);
+        for (int block = 0; block < 70; ++block)
+        {
+            buffer.clear();
+            processor.processBlock(buffer, midi);
+            midi.clear();
+        }
+    }
     auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
     if (mode == 4) editor->setSize(615, 420);
     for (auto* child : editor->getChildren())
@@ -357,6 +377,17 @@ bool snapshot(const juce::File& file, int mode)
             if (mode == 1 || mode == 4) scene->seek(0.62f);
             if (mode == 3) { scene->toggleRunning(); scene->advance(100); }
             if (mode == 6) scene->seek(0.45f);
+            if (mode == 7) scene->seek(0.10f);
+            if (mode == 8 || mode == 9)
+            {
+                scene->setOutputLevel(processor.outputPeak());
+                for (int i = 0; i < 24; ++i) scene->advance(1.0 / 30.0);
+                if (mode == 8) scene->seek(0.45f);
+                std::array<float, transcription::spectrumBandCount> bands {};
+                for (int i = 0; i < transcription::spectrumBandCount; ++i)
+                    bands[static_cast<size_t>(i)] = processor.spectrumBandDb(i);
+                scene->setSpectrum(bands);
+            }
         }
         if (auto* picker = dynamic_cast<CodonPicker*>(child))
             if (mode == 2 || mode == 5)
@@ -424,6 +455,9 @@ int main(int argc, char* argv[])
         if (option == "--compact-snapshot") return snapshot(file, 4) ? 0 : 1;
         if (option == "--all-codons-snapshot") return snapshot(file, 5) ? 0 : 1;
         if (option == "--long-snapshot") return snapshot(file, 6) ? 0 : 1;
+        if (option == "--carving-snapshot") return snapshot(file, 7) ? 0 : 1;
+        if (option == "--spectrum-snapshot") return snapshot(file, 8) ? 0 : 1;
+        if (option == "--noise-spectrum-snapshot") return snapshot(file, 9) ? 0 : 1;
         if (option == "--audio-preview") return audioPreview(file) ? 0 : 1;
         return 2;
     }

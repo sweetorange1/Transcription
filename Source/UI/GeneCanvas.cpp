@@ -27,6 +27,9 @@ juce::Point<float> bezier(juce::Point<float> a, juce::Point<float> b, juce::Poin
 }
 GeneCanvas::GeneCanvas()
 {
+    spectrumDb.fill(transcription::spectrumMinDb);
+    spectrumDisplay.fill(transcription::spectrumMinDb);
+    spectrumPeak.fill(transcription::spectrumMinDb);
     setName("Transcription scene");
     setTooltip(juce::String::fromUTF8("Click a codon to replace it as a unit. Start (ATG) and stop codons are fixed. Drag RNA polymerase to explore transcription — drag it to the far left to detach it from DNA."));
 }
@@ -161,6 +164,7 @@ void GeneCanvas::advance(double seconds)
 {
     if (!std::isfinite(seconds) || seconds <= 0.0) return;
     ambientTime = std::fmod(ambientTime + seconds, 600.0);
+    smoothedLevel += (outputLevel - smoothedLevel) * juce::jlimit(0.0f, 1.0f, static_cast<float>(seconds * 9.0));
     if (hintTimer >= 0.0)
     {
         hintTimer -= seconds;
@@ -277,11 +281,13 @@ void GeneCanvas::paint(juce::Graphics& g)
     g.setColour(ui::line);
     g.drawLine(promoterX, 32, promoterX, 46, 0.8f);
     g.drawLine(terminatorX, 32, terminatorX, 46, 0.8f);
+    drawSignalFlow(g);   // 先画信号带，聚合酶与 RNA 覆盖其上：声音“穿过”聚合酶
     drawPolymerase(g);
     drawDna(g);
+    drawSpectrumMonitor(g);
     drawRna(g);
-    drawSpectrum(g);
-    if (producedBases() == 0)
+    // 待机提示只在没有声音时出现：一旦按下键盘，让位给右下角的实时频谱。
+    if (producedBases() == 0 && smoothedLevel < 0.02f)
     {
         const auto hint = genome.size == 0 ? "Start with a codon" : (started ? "The DNA strands are opening" : "Guide RNA polymerase along DNA");
         ui::text(g, hint, { 190, 218, 414, 24 }, 15, ui::muted.withAlpha(0.85f), juce::Justification::centred);
@@ -308,7 +314,9 @@ void GeneCanvas::drawPolymerase(juce::Graphics& g)
     contour.startNewSubPath(p.x - 43, p.y - 24);
     contour.cubicTo(p.x - 29, p.y - 43, p.x + 23, p.y - 40, p.x + 40, p.y - 23);
     g.setColour(ui::green.withAlpha(0.18f * alpha)); g.strokePath(contour, juce::PathStrokeType(0.8f));
-    ui::text(g, "RNA polymerase", { p.x - 67, p.y + 64, 134, 18 }, 10, ui::green.withAlpha(alpha), juce::Justification::centred);
+    // 未结合（悬浮）状态不画文字标注：此时它正压在信号带上，且下方提示语已经说明了角色。
+    if (phase() != Phase::ready && phase() != Phase::detaching)
+        ui::text(g, "RNA polymerase", { p.x - 67, p.y + 70, 134, 18 }, 10, ui::green.withAlpha(alpha), juce::Justification::centred);
     if (phase() == Phase::elongating)
     {
         g.setColour(ui::green.withAlpha(0.55f));
@@ -452,8 +460,8 @@ void GeneCanvas::drawRna(juce::Graphics& g)
     }
     ui::text(g, "5'", { tail.x - 27, tail.y - 8, 23, 17 }, 10, ui::green);
     ui::text(g, "3'", { tip.x + 10, tip.y - 4, 23, 17 }, 10, ui::green);
-    ui::text(g, released > 0.5f ? "RNA released" : "Nascent RNA", { tail.x - 4, 267, 145, 17 }, 10.5f, ui::green);
-    ui::text(g, juce::String(count) + " nt", { 654, 244, 84, 22 }, 15, ui::green, juce::Justification::centredRight);
+    ui::text(g, released > 0.5f ? "RNA released" : "Nascent RNA", { tail.x - 4, 267, 100, 17 }, 10.5f, ui::green);
+    ui::text(g, juce::String(count) + " nt", { tail.x + 98, 267, 70, 17 }, 10.5f, ui::green.withAlpha(0.8f));
     if (phase() == Phase::elongating && running)
     {
         for (int i = 0; i < 4; ++i)
@@ -512,44 +520,228 @@ void GeneCanvas::drawCodons(juce::Graphics& g)
         g.fillRoundedRectangle(32.0f + (708.0f - width) * scroll / maxScroll(), 374, width, 1.5f, 0.7f);
     }
 }
-void GeneCanvas::drawSpectrum(juce::Graphics& g)
+void GeneCanvas::drawSignalFlow(juce::Graphics& g)
 {
-    // 合成频谱（非 FFT）：直接取当前谐波模板 + 倾斜/共振峰/偏置的频响，
-    // 随 scanPhase 从平坦白噪声逐步长成完整音色谱。
+    // 横贯基因下方的“信号带”：聚合酶右侧是尚未读取的基因段，同一路信号仍是混沌的布朗噪声；
+    // 左侧已被读取，波形被雕成周期性的谐波。分界点跟着聚合酶移动，于是整条带在转录过程中
+    // 由灰色噪声逐段变成绿色乐音；带画在聚合酶之前，视觉上声音“穿过”聚合酶才被改造。
+    if (genome.size == 0) return;
     const auto transcript = transcription::transcribe(genome);
     const float phase = scanPhase();
-    const int M = transcript.coreCount + transcript.bodyCount;
-    const float coreWindow = M > 0 ? static_cast<float>(transcript.coreCount) / static_cast<float>(M) : 0.0f;
-    const float coreProgress = coreWindow > 0.0f ? juce::jlimit(0.0f, 1.0f, phase / coreWindow) : 0.0f;
-    const float coreActivation = coreProgress * coreProgress * (3.0f - 2.0f * coreProgress);
+    const int sections = transcript.coreCount + transcript.bodyCount;
+    const float coreWindow = sections > 0 ? static_cast<float>(transcript.coreCount) / static_cast<float>(sections) : 0.0f;
+    // 只有核心区（C1..C3）存在时才可能产生乐音；core=0 时整条带保持噪声。
+    // 与 Engine 的第 1 级窗口一致：[0, coreWindow/4] 内完成谐波组的激活。
+    const float bank = transcript.coreCount > 0 && coreWindow > 1.0e-4f
+        ? ease(phase / juce::jmax(1.0e-4f, coreWindow * 0.25f)) : 0.0f;
 
-    constexpr int bars = 32;
-    constexpr float left = 600.0f, top = 150.0f, right = 768.0f, bottom = 194.0f;
-    const float step = (right - left) / static_cast<float>(bars);
-    constexpr float f0 = 440.0f;
-    const float tiltExp = juce::jlimit(0.0f, 3.0f, transcript.coreSlope / 6.0f - 1.0f);
+    const float margin = dnaMargin;
+    const float left = juce::jmax(panelLeft + 12.0f, dnaScreenX(-margin));
+    const float right = juce::jmin(panelRight - 12.0f, dnaScreenX(dnaSpan() + margin));
+    if (right - left < 40.0f) return;
 
-    for (int k = 0; k < bars; ++k)
+    constexpr float baseline = 150.0f;
+    const float amplitude = 12.5f * (0.85f + 0.3f * smoothedLevel);
+    const float edge = juce::jlimit(left + 14.0f, right - 14.0f, polymerasePosition().x);
+
+    // 噪声侧：逐点伪随机抖动，20 Hz 双帧插值；乐音侧：与 DNA 双螺旋同周期、同相位的正弦。
+    const auto hash = [](int index, int frame)
     {
-        const float harmonic = static_cast<float>(k + 1);
-        float amp = 0.30f * (1.0f - coreActivation);   // 白噪声平坦基底，随激活衰减
-        if (k < transcript.coreHarmonics)
-        {
-            float h = 1.0f / std::pow(harmonic, tiltExp);
-            h *= (k % 2 == 0) ? (1.0f + transcript.coreOddEven) : (1.0f - transcript.coreOddEven);
-            const float f = harmonic * f0;
-            const float cutoff2 = transcript.coreCutoff * transcript.coreCutoff;
-            h *= cutoff2 / (cutoff2 + f * f);
-            const float d = (f - transcript.coreFormant) / transcript.coreFormant;
-            h *= 1.0f + transcript.coreFormantAmt * 2.0f * std::exp(-d * d);
-            amp += h * coreActivation;
-        }
-        const float height = juce::jlimit(0.0f, 1.0f, amp) * (bottom - top);
-        const float x = left + static_cast<float>(k) * step;
-        g.setColour(ui::green.withAlpha(0.28f + 0.45f * coreActivation));
-        g.fillRect(x + 0.5f, bottom - height, step - 1.0f, height);
+        std::uint32_t x = static_cast<std::uint32_t>(index) * 374761393u
+                        + static_cast<std::uint32_t>(frame) * 668265263u;
+        x = (x ^ (x >> 13)) * 1274126177u;
+        return (x ^ (x >> 16)) & 0xFFFFu;
+    };
+    const double ticks = ambientTime * 20.0;
+    const int frame = static_cast<int>(std::floor(ticks));
+    const float frameBlend = static_cast<float>(ticks - std::floor(ticks));
+
+    juce::Path wave;
+    constexpr int points = 260;
+    for (int i = 0; i <= points; ++i)
+    {
+        const float x = left + (right - left) * static_cast<float>(i) / static_cast<float>(points);
+        const float a = static_cast<float>(hash(i, frame)) / 32767.5f - 1.0f;
+        const float b = static_cast<float>(hash(i, frame + 1)) / 32767.5f - 1.0f;
+        const float noise = a + (b - a) * frameBlend;
+        // 与 GeneCanvas::drawDna 的螺旋完全同周期（0.068 rad/px）、同相位，读起来像 DNA 向下一层延伸。
+        const float tone = -std::sin((x - 40.0f) * 0.068f);
+        // 分界带：聚合酶左侧 20 px 内从噪声过渡到乐音。
+        const float blend = juce::jlimit(0.0f, 1.0f, (edge + 20.0f - x) / 40.0f);
+        const float local = bank * blend * blend * (3.0f - 2.0f * blend);
+        const float value = juce::jlimit(-1.0f, 1.0f, noise + (tone - noise) * local);
+        const float y = baseline - value * amplitude;
+        if (i == 0) wave.startNewSubPath(x, y); else wave.lineTo(x, y);
     }
-    ui::text(g, "HARMONICS", { left, top - 13.0f, right - left, 12 }, 8, ui::muted, juce::Justification::centred);
+
+    g.setColour(ui::muted.withAlpha(0.55f));
+    g.strokePath(wave, juce::PathStrokeType(1.1f));
+    if (bank > 0.01f)
+    {
+        juce::Graphics::ScopedSaveState save(g);
+        g.reduceClipRegion(juce::Rectangle<float>(left - 2.0f, baseline - amplitude - 4.0f,
+                                                  edge - left + 2.0f, amplitude * 2.0f + 8.0f).toNearestInt());
+        g.setColour(ui::green.withAlpha(0.35f + 0.45f * bank));
+        g.strokePath(wave, juce::PathStrokeType(1.4f));
+    }
+
+    const char* caption = bank > 0.02f ? (bank < 0.98f ? "NOISE \xE2\x86\x92 HARMONICS" : "HARMONIC TONE") : "BROWN NOISE";
+    const float labelY = baseline + amplitude + 3.0f;
+    ui::text(g, caption, { left, labelY, 220.0f, 11.0f }, 7.5f, bank > 0.02f ? ui::green : ui::muted);
+    if (bank > 0.02f)
+        ui::text(g, "NOISE", { right - 60.0f, labelY, 60.0f, 11.0f }, 7.5f, ui::muted,
+                 juce::Justification::centredRight);
+}
+void GeneCanvas::setSpectrum(const std::array<float, transcription::spectrumBandCount>& decibels) noexcept
+{
+    constexpr int bands = transcription::spectrumBandCount;
+    bool audible = false;
+    for (int i = 0; i < bands; ++i)
+    {
+        spectrumDb[static_cast<size_t>(i)] = decibels[static_cast<size_t>(i)];
+        if (spectrumDb[static_cast<size_t>(i)] > transcription::spectrumMinDb + 6.0f) audible = true;
+    }
+    hasSpectrum = audible;
+
+    // 列间平滑：沿用 Y2KMeter 的 [1,2,1]/4 小核，把频段台阶磨成曲线。
+    spectrumDisplay = spectrumDb;
+    for (int pass = 0; pass < 1; ++pass)
+    {
+        float previous = spectrumDisplay[0];
+        for (int i = 1; i < bands - 1; ++i)
+        {
+            const auto slot = static_cast<size_t>(i);
+            const float centre = spectrumDisplay[slot];
+            spectrumDisplay[slot] = 0.25f * previous + 0.5f * centre + 0.25f * spectrumDisplay[static_cast<size_t>(i + 1)];
+            previous = centre;
+        }
+    }
+
+    // 峰顶保持：1.5 s 滞留 + 12 dB/s 回落（30 Hz 下约 0.4 dB/帧）。
+    for (int i = 0; i < bands; ++i)
+    {
+        const auto slot = static_cast<size_t>(i);
+        const float db = spectrumDisplay[slot];
+        if (db >= spectrumPeak[slot])
+        {
+            spectrumPeak[slot] = db;
+            spectrumHoldFrames[slot] = 0;
+        }
+        else if (++spectrumHoldFrames[slot] > 45)
+        {
+            spectrumPeak[slot] = juce::jmax(transcription::spectrumMinDb, spectrumPeak[slot] - 0.4f);
+        }
+    }
+}
+void GeneCanvas::drawSpectrumMonitor(juce::Graphics& g)
+{
+    // 右下「输出监视器」：真实输出音频的 FFT（不是模板）。静音时淡出；只在已经产生 RNA 后
+    // 出现，与待机提示语的出现条件互斥，避免叠字。
+    if (!hasSpectrum) return;
+    const float visible = juce::jlimit(0.0f, 1.0f, smoothedLevel * 6.0f);
+    if (visible < 0.03f) return;
+
+    constexpr float left = 470.0f, right = 768.0f;
+    constexpr float top = 220.0f, baseline = 264.0f;
+    constexpr int bands = transcription::spectrumBandCount;
+    const float step = (right - left) / static_cast<float>(bands - 1);
+    const float span = baseline - top;
+
+    const auto heightOf = [&](float db)
+    {
+        return juce::jlimit(0.0f, 1.0f, (db - transcription::spectrumMinDb)
+            / (transcription::spectrumMaxDb - transcription::spectrumMinDb)) * span;
+    };
+
+    g.setColour(ui::line);
+    g.drawLine(left, baseline, right, baseline, 0.8f);
+
+    const auto yOf = [&](float db) { return baseline - heightOf(db); };
+
+    // Catmull-Rom → cubic Bézier（张力 1/6）：与 Y2KMeter 频谱相同的平滑画法，
+    // 端点复制收束、控制点夹在绘图区内，避免过冲。
+    const auto buildCurve = [&](juce::Path& path, const std::array<float, bands>& levels, bool closed)
+    {
+        if (closed)
+        {
+            path.startNewSubPath(left, baseline);
+            path.lineTo(left, yOf(levels[0]));
+        }
+        else path.startNewSubPath(left, yOf(levels[0]));
+
+        for (int i = 0; i < bands - 1; ++i)
+        {
+            const float x1 = left + step * static_cast<float>(i);
+            const float x2 = x1 + step;
+            const float y1 = yOf(levels[static_cast<size_t>(i)]);
+            const float y2 = yOf(levels[static_cast<size_t>(i + 1)]);
+            const float y0 = i > 0 ? yOf(levels[static_cast<size_t>(i - 1)]) : y1;
+            const float y3 = i + 2 < bands ? yOf(levels[static_cast<size_t>(i + 2)]) : y2;
+            const float c1 = juce::jlimit(top, baseline, y1 + (y2 - y0) / 6.0f);
+            const float c2 = juce::jlimit(top, baseline, y2 - (y3 - y1) / 6.0f);
+            path.cubicTo(x1 + step / 3.0f, c1, x2 - step / 3.0f, c2, x2, y2);
+        }
+        if (closed)
+        {
+            path.lineTo(right, baseline);
+            path.closeSubPath();
+        }
+    };
+
+    juce::Path area, curve, holdCurve;
+    buildCurve(area, spectrumDisplay, true);
+    buildCurve(curve, spectrumDisplay, false);
+    buildCurve(holdCurve, spectrumPeak, false);
+
+    g.setColour(ui::green.withAlpha(0.18f * visible));
+    g.strokePath(holdCurve, juce::PathStrokeType(0.7f));
+
+    g.setColour(ui::green.withAlpha(0.10f * visible));
+    g.fillPath(area);
+    g.setColour(ui::green.withAlpha(0.55f * visible));
+    g.strokePath(curve, juce::PathStrokeType(0.9f));
+
+    // 山峰：找局部极大值，取最高的三个画峰顶圆点并标注频率；圆点带峰顶保持。
+    struct Peak { int index; float db; };
+    std::array<Peak, bands> peaks {};
+    int peakCount = 0;
+    for (int i = 3; i < bands - 3; ++i)
+    {
+        const float db = spectrumDisplay[static_cast<size_t>(i)];
+        if (db < transcription::spectrumMinDb + 12.0f) continue;
+        if (db <= spectrumDisplay[static_cast<size_t>(i - 1)] || db < spectrumDisplay[static_cast<size_t>(i + 1)]) continue;
+        // 只保留相对两侧有 3 dB 以上凸起的峰，跳过噪声地板的细小起伏。
+        const float shoulder = juce::jmax(spectrumDisplay[static_cast<size_t>(i - 3)],
+                                          spectrumDisplay[static_cast<size_t>(i + 3)]);
+        if (db - shoulder < 3.0f) continue;
+        peaks[static_cast<size_t>(peakCount++)] = { i, db };
+    }
+    std::sort(peaks.begin(), peaks.begin() + peakCount, [](Peak a, Peak b) { return a.db > b.db; });
+
+    int labelled = 0;
+    int lastIndex = -100;
+    for (int p = 0; p < peakCount && labelled < 3; ++p)
+    {
+        const int index = peaks[static_cast<size_t>(p)].index;
+        if (index - lastIndex < 5) continue;      // 相邻谐波不重复标注
+        lastIndex = index;
+        ++labelled;
+        const float x = left + step * static_cast<float>(index);
+        const float y = yOf(peaks[static_cast<size_t>(p)].db);
+        g.setColour(ui::green.withAlpha(0.85f * visible));
+        g.fillEllipse(x - 1.6f, y - 1.6f, 3.2f, 3.2f);
+
+        const float t = (static_cast<float>(index) + 0.5f) / static_cast<float>(bands);
+        const float frequency = 40.0f * std::pow(16000.0f / 40.0f, t);
+        const auto label = frequency >= 1000.0f ? juce::String(frequency / 1000.0f, 1) + "k"
+                                                : juce::String(juce::roundToInt(frequency));
+        ui::text(g, label, { x - 15.0f, baseline + 2.0f, 30.0f, 10.0f }, 7.0f, ui::muted.withAlpha(visible),
+                 juce::Justification::centred);
+    }
+
+    ui::text(g, "OUTPUT SPECTRUM", { left, top - 14.0f, 160.0f, 11.0f }, 7.5f, ui::muted);
+    ui::text(g, "40 Hz - 16 kHz", { right - 90.0f, top - 14.0f, 90.0f, 11.0f }, 7.0f,
+             ui::muted.withAlpha(0.85f), juce::Justification::centredRight);
 }
 void GeneCanvas::mouseDown(const juce::MouseEvent& event)
 {

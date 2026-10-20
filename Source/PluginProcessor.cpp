@@ -26,6 +26,16 @@ void TranscriptionAudioProcessor::prepareToPlay(double sampleRate, int)
     engine.setTranscript(transcription::transcribe(audioGenome));
     keyboardState.reset();
     meter.store(0.0f); voiceMeter.store(0);
+
+    // 频谱分析缓冲（只在 prepare 中初始化，音频线程不再分配）。
+    for (int i = 0; i < spectrumFftSize; ++i)
+        spectrumWindow[static_cast<size_t>(i)] = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi
+            * static_cast<float>(i) / static_cast<float>(spectrumFftSize - 1));
+    spectrumRing.fill(0.0f);
+    spectrumBuffer.fill(0.0f);
+    spectrumSmoothed.fill(transcription::spectrumMinDb);
+    for (auto& band : spectrumBands) band.store(transcription::spectrumMinDb, std::memory_order_relaxed);
+    spectrumWrite = 0; spectrumHop = 0;
 }
 void TranscriptionAudioProcessor::releaseResources() { reset(); }
 void TranscriptionAudioProcessor::reset()
@@ -89,9 +99,60 @@ void TranscriptionAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         if (metadata.numBytes <= 3) handleMidi(metadata.getMessage());
     }
     renderTo(count);
+    analyseSpectrum(left, right, count);
     meter.store(peak, std::memory_order_relaxed);
     voiceMeter.store(engine.activeVoices(), std::memory_order_relaxed);
     midi.clear();
+}
+void TranscriptionAudioProcessor::analyseSpectrum(const float* left, const float* right, int samples) noexcept
+{
+    if (left == nullptr || samples <= 0) return;
+    const double rate = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    const float binHz = static_cast<float>(rate) / static_cast<float>(spectrumFftSize);
+    // Hann 窗的相干增益为 0.5，且实信号 DFT 峰值约为 N/4，这里乘 4/N 让满幅正弦回到 0 dB。
+    const float scale = 4.0f / static_cast<float>(spectrumFftSize);
+
+    for (int i = 0; i < samples; ++i)
+    {
+        spectrumRing[static_cast<size_t>(spectrumWrite)] = right != nullptr
+            ? 0.5f * (left[i] + right[i]) : left[i];
+        spectrumWrite = (spectrumWrite + 1) % spectrumFftSize;
+        if (++spectrumHop < spectrumHopSamples) continue;
+        spectrumHop = 0;
+
+        for (int j = 0; j < spectrumFftSize; ++j)
+            spectrumBuffer[static_cast<size_t>(j)] =
+                spectrumRing[static_cast<size_t>((spectrumWrite + j) % spectrumFftSize)]
+                * spectrumWindow[static_cast<size_t>(j)];
+        std::fill(spectrumBuffer.begin() + spectrumFftSize, spectrumBuffer.end(), 0.0f);
+        spectrumFft.performFrequencyOnlyForwardTransform(spectrumBuffer.data());
+
+        // 对数频段 40 Hz – 16 kHz，按带宽求平均功率（PSD），使白噪声读作平坦地板。
+        constexpr float minimumHz = 40.0f, maximumHz = 16000.0f;
+        for (int b = 0; b < transcription::spectrumBandCount; ++b)
+        {
+            const float t0 = static_cast<float>(b) / static_cast<float>(transcription::spectrumBandCount);
+            const float t1 = static_cast<float>(b + 1) / static_cast<float>(transcription::spectrumBandCount);
+            const float f0 = minimumHz * std::pow(maximumHz / minimumHz, t0);
+            const float f1 = minimumHz * std::pow(maximumHz / minimumHz, t1);
+            const int start = juce::jmax(1, static_cast<int>(std::floor(f0 / binHz)));
+            const int end = juce::jmin(spectrumFftSize / 2,
+                juce::jmax(start + 1, static_cast<int>(std::ceil(f1 / binHz))));
+            double power = 0.0;
+            for (int k = start; k < end; ++k)
+            {
+                const double magnitude = static_cast<double>(spectrumBuffer[static_cast<size_t>(k)]) * scale;
+                power += magnitude * magnitude;
+            }
+            power /= static_cast<double>(end - start);
+            const float db = static_cast<float>(10.0 * std::log10(power + 1.0e-10));
+            float& smooth = spectrumSmoothed[static_cast<size_t>(b)];
+            smooth += (db - smooth) * (db > smooth ? 0.55f : 0.12f);
+            spectrumBands[static_cast<size_t>(b)].store(
+                juce::jlimit(transcription::spectrumMinDb, transcription::spectrumMaxDb, smooth),
+                std::memory_order_relaxed);
+        }
+    }
 }
 void TranscriptionAudioProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {

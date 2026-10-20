@@ -7,7 +7,7 @@ namespace transcription
 // 减法核心参数（由 transcript 的 key1 映射产出，无旋钮）。
 struct CoreParams
 {
-    int harmonics = 16;          // 激活谐波数（coreHarmonics）
+    int harmonics = 6;           // 激活谐波数（coreHarmonics，范围 2..8）
     float resonance = 0.5f;      // 谐振 Q 控制 [0,1]（coreResonance）
     float cutoff = 8000.0f;      // 频谱倾斜低通截止（coreCutoff，Hz）
     float slope = 12.0f;         // 谐波增益衰减斜率 dB/oct（coreSlope）
@@ -24,7 +24,10 @@ class SubtractiveCore
 public:
     void prepare(double sampleRate) noexcept;
     void reset() noexcept;
-    void setParameters(double sampleRate, float f0, const CoreParams& params) noexcept;
+    // snap = true：系数立即吸附到目标值，不做 4 ms 平滑。仅用于新音符起始
+    // （此时滤波器状态为零、参数即当前 transcript），避免起音瞬间以“直通”系数
+    // 运行而破坏谐振组的能量守恒归一化。
+    void setParameters(double sampleRate, float f0, const CoreParams& params, bool snap = false) noexcept;
     // activation[0..3] 对应谐振组/倾斜/共振峰/偏置的激活系数（0=旁路直通，1=完全激活）。
     float process(float input, const std::array<float, 4>& activation) noexcept;
 
@@ -40,8 +43,9 @@ private:
         float tick(float x, float smoothing) noexcept;
         void snap() noexcept;
     };
-    std::array<Biquad, 32> resonators;
-    std::array<float, 32> gains {};
+    static constexpr int maxHarmonics = 8;   // 8 路带通并联（原 32 路）
+    std::array<Biquad, maxHarmonics> resonators;
+    std::array<float, maxHarmonics> gains {};
     Biquad tilt, formant;
     float drive = 0.0f;
     double sampleRate = 44100.0;

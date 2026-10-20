@@ -68,7 +68,7 @@
 | 语言 Language | C++17 |
 | 框架 Framework | [JUCE](https://juce.com) 8.0.12（FetchContent 自动拉取） |
 | 构建 Build | CMake ≥ 3.22 |
-| 格式 Formats | VST3 / Standalone（macOS 另加 AU） |
+| 格式 Formats | VST3（macOS 另加 AU）。Standalone 仅为本地测试构建，**不随用户安装包分发** |
 | DSP | 自研噪声减法核心 + 三套身体效果链，FFT 使用 `juce_dsp` |
 
 ---
@@ -83,11 +83,11 @@ cd Transcription
 ### Windows
 
 ```powershell
-# 一键构建 VST3 + Standalone，并运行全部离线回归
+# 一键构建 VST3 + Standalone（Standalone 仅用于本地测试），并运行全部离线回归
 .\build.ps1
 ```
 
-产物位于 `cmake-build-ninja/Transcription_artefacts/Release/`（`VST3/ChemE-Transcription.vst3`、`Standalone/ChemE-Transcription.exe`）。
+产物位于 `cmake-build-ninja/Transcription_artefacts/Release/`（`VST3/ChemE-Transcription.vst3`、`Standalone/ChemE-Transcription.exe`）。分发给用户的是 `VST3`；`Standalone` 仅供本地测试。
 
 ### macOS
 
@@ -96,7 +96,7 @@ cmake -B cmake-build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build cmake-build-release --config Release
 ```
 
-产物位于 `cmake-build-release/Transcription_artefacts/Release/`（`VST3`、`AU`、`Standalone`）。
+产物位于 `cmake-build-release/Transcription_artefacts/Release/`（`VST3`、`AU`，以及仅供本地测试的 `Standalone`）。分发给用户的是 `VST3` 与 `AU`。
 
 ### 离线测试 / Offline tests
 

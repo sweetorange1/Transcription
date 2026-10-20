@@ -9,18 +9,6 @@ namespace transcription
 {
 constexpr int voiceCount = 8;
 
-// 旧参数结构保留（参数 ID 与宿主状态兼容），字段已全部降级为 no-op，不再驱动 DSP。
-struct Controls
-{
-    float precision = 0.65f;
-    float mutation = 0.08f;
-    float attackScale = 1.0f;
-    float releaseScale = 1.0f;
-    float width = 0.45f;
-    float outputDb = -3.0f;
-    int noise = 0;
-};
-
 class Engine
 {
 public:

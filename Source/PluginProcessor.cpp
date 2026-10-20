@@ -5,18 +5,12 @@
 TranscriptionAudioProcessor::TranscriptionAudioProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       parameters(*this, nullptr, "TranscriptionParameters", transcription::createParameterLayout()),
-      parameterRefs(parameters), genome(transcription::presetGenome(transcription::presetCount - 1)), audioGenome(genome)
+      genome(transcription::presetGenome(transcription::defaultPresetIndex)), audioGenome(genome)
 {
-    // 默认从最小阅读框（Start + Stop：只有起始与终止密码子）开始，
-    // 用户逐个添加密码子时转录场景中的 DNA 链随之变长。
-    const auto& controls = transcription::factoryPresets()[transcription::presetCount - 1].controls;
-    const std::array<float, 7> values { controls.precision, controls.mutation, controls.attackScale,
-                                        controls.releaseScale, controls.width, controls.outputDb,
-                                        static_cast<float>(controls.noise) };
-    for (size_t i = 0; i < values.size(); ++i)
-        if (auto* parameter = parameters.getParameter(transcription::parameterIds[i]))
-            parameter->setValueNotifyingHost(parameter->convertTo0to1(values[i]));
-    lastPreset.store(transcription::presetCount - 1);
+    // 默认载入 Insulin / INS：一条真实 CDS 片段，核心区/中间区都完整，
+    // 新用户第一次播放转录就能听到完整的三段式音色变化（而不是只有噪声的 Start + Stop）。
+    lastPreset.store(transcription::defaultPresetIndex);
+    scanParameter = parameters.getParameter(scanParameterId);
     mailbox.publish(genome);
 }
 void TranscriptionAudioProcessor::prepareToPlay(double sampleRate, int)
@@ -64,7 +58,10 @@ void TranscriptionAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     buffer.clear();
     const int count = buffer.getNumSamples();
     if (mailbox.read(audioGenome, audioVersion)) engine.setTranscript(transcription::transcribe(audioGenome));
-    engine.setScanPhase(scanPhase.load(std::memory_order_relaxed));
+    // 转录进度完全以 scan 参数为准：宿主自动化、工程恢复、界面动画都写到同一个参数。
+    const float progress = scanParameter != nullptr ? scanParameter->getValue() : 1.0f;
+    scanPhase.store(progress, std::memory_order_relaxed);
+    engine.setScanPhase(progress);
     if (buffer.getNumChannels() == 0 || count == 0)
     {
         for (const auto metadata : midi)
@@ -198,19 +195,14 @@ void TranscriptionAudioProcessor::setParameter(const juce::String& id, float val
 void TranscriptionAudioProcessor::loadPreset(int index)
 {
     if (index < 0 || index >= transcription::presetCount) return;
-    const auto& c = transcription::factoryPresets()[static_cast<size_t>(index)].controls;
-    const std::array<float, 7> values { c.precision, c.mutation, c.attackScale, c.releaseScale, c.width, c.outputDb, static_cast<float>(c.noise) };
-    for (size_t i = 0; i < values.size(); ++i) setParameter(transcription::parameterIds[i], values[i]);
     setGenome(transcription::presetGenome(index));
     lastPreset.store(index);
 }
 int TranscriptionAudioProcessor::matchingPreset() const
 {
     const auto current = currentGenome();
-    const auto controls = currentControls();
     for (int i = 0; i < transcription::presetCount; ++i)
-        if (current == transcription::presetGenome(i)
-            && transcription::sameControls(controls, transcription::factoryPresets()[static_cast<size_t>(i)].controls)) return i;
+        if (current == transcription::presetGenome(i)) return i;
     return -1;
 }
 void TranscriptionAudioProcessor::setCurrentProgram(int index) { loadPreset(index); }
@@ -250,15 +242,18 @@ void TranscriptionAudioProcessor::setStateInformation(const void* data, int byte
     for (int i = 0; i < restored.size; ++i) restored.silent[static_cast<size_t>(i)] = mask[i] == '1';
     auto tree = juce::ValueTree::fromXml(*parameterXml);
     if (!tree.isValid()) return;
-    for (const auto* id : transcription::parameterIds)
+    const auto scanEntry = tree.getChildWithProperty("id", scanParameterId);
+    const bool hadScan = scanEntry.isValid();
+    if (hadScan)
     {
-        const auto entry = tree.getChildWithProperty("id", id);
-        if (!entry.isValid() || !entry.hasProperty("value")) return;
-        const float value = static_cast<float>(entry.getProperty("value"));
-        const auto range = parameters.getParameter(id)->getNormalisableRange();
-        if (!std::isfinite(value) || value < range.start || value > range.end) return;
+        const float value = static_cast<float>(scanEntry.getProperty("value"));
+        if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return;
     }
-    parameters.replaceState(tree);
+    parameters.replaceState(tree);   // 注意：replaceState 会把缺失的参数补进 tree，所以先记下 hadScan
+    // 旧工程没有 scan 参数：回到待机，而不是沿用上一个工程的位置。
+    if (!hadScan && scanParameter != nullptr)
+        scanParameter->setValueNotifyingHost(0.0f);
+    stateRestored.store(true);
     setGenome(restored);
     lastPreset.store(juce::jlimit(0, transcription::presetCount - 1, root->getIntAttribute("program", 0)));
     editorWidth.store(juce::jlimit(615, 1640, root->getIntAttribute("editorWidth", 820)));

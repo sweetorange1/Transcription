@@ -33,6 +33,17 @@ private:
     juce::String current;
 };
 
+// 首次打开时的引导层：只画在画布上方，不拦截鼠标，点击直接落到右下角的转录按钮。
+class FirstRunHint final : public juce::Component
+{
+public:
+    FirstRunHint();
+    void paint(juce::Graphics&) override;
+    void setPhase(double value) noexcept { phase = value; repaint(); }
+private:
+    double phase = 0.0;
+};
+
 class TranscriptionAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -50,6 +61,7 @@ private:
     void configureButton(juce::TextButton&, const char*, bool flat = true);
     void showPresets();
     void showMore();
+    void showIntro();
     void choosePreset(int index);
     void applyEdit(const transcription::Genome&);
     void undoEdit(bool redo);
@@ -60,6 +72,14 @@ private:
     GeneCanvas canvas;
     CodonPicker picker;
     juce::TooltipWindow tooltips;
+    FirstRunHint hint;
+    juce::PropertiesFile settings;
+    bool onboarding = false, demoNoteHeld = false;
+    double demoNoteStarted = 0.0;
+    juce::RangedAudioParameter* scanParameter = nullptr;
+    float lastScanWritten = 0.0f;
+    double lastScanWriteMs = 0.0;
+    bool wasDriving = false;
     juce::TextButton preset, transport, more;
     transcription::Genome genome;
     std::vector<transcription::Genome> undoStack, redoStack;

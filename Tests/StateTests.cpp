@@ -260,9 +260,8 @@ void openEditorStateTests()
     {
         target.loadPreset(0); tick();   // 默认实例只有起始与终止密码子；用较长的工厂序列测试整组替换
         const auto original = target.currentGenome();
-        const auto controls = target.currentControls();
         scene->setCodon(1, "GCU");
-        check(target.currentGenome() != original && transcription::sameControls(controls, target.currentControls()), "codon selection updates the saved DNA without altering sound controls");
+        check(target.currentGenome() != original, "codon selection updates the saved DNA");
         editor->keyPressed(juce::KeyPress('Z', juce::ModifierKeys(juce::ModifierKeys::commandModifier), 0));
         check(target.currentGenome() == original, "a whole-codon choice is one undo operation");
         scene->toggleRunning(); scene->advance(4.0);
@@ -274,24 +273,136 @@ void openEditorStateTests()
         check(target.soundingVoices() == 0 && target.currentGenome() == original, "running the visual process neither triggers MIDI nor rewrites DNA");
     }
 }
+void scanRestoreUiTest()
+{
+    const auto tick = []
+    {
+        for (int i = 0; i < 12; ++i) { juce::Thread::sleep(10); juce::Timer::callPendingTimersSynchronously(); }
+    };
+    const auto findScene = [](juce::AudioProcessorEditor& editor) -> GeneCanvas*
+    {
+        for (auto* child : editor.getChildren())
+            if (auto* canvas = dynamic_cast<GeneCanvas*>(child)) return canvas;
+        return nullptr;
+    };
+
+    TranscriptionAudioProcessor source;
+    source.loadPreset(1);
+    source.setParameter("scan", 0.42f);
+    juce::MemoryBlock state;
+    source.getStateInformation(state);
+
+    // 宿主先恢复状态、再创建界面
+    {
+        TranscriptionAudioProcessor reopened;
+        reopened.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+        std::unique_ptr<juce::AudioProcessorEditor> editor(reopened.createEditor());
+        auto* scene = findScene(*editor);
+        tick();
+        check(scene != nullptr && std::abs(scene->progress() - 0.42f) < 0.02f,
+              "editor restores the polymerase position when state is restored before opening");
+    }
+    // 宿主先创建界面、再恢复状态
+    {
+        TranscriptionAudioProcessor live;
+        live.loadPreset(1);
+        std::unique_ptr<juce::AudioProcessorEditor> editor(live.createEditor());
+        auto* scene = findScene(*editor);
+        tick();   // 界面已经渲染过几帧后才收到工程状态
+        live.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+        tick();
+        check(scene != nullptr && std::abs(scene->progress() - 0.42f) < 0.02f,
+              "editor follows a state restore that happens after opening");
+    }
+
+    // 保存位置正好是 100 %（拖到最右端）时，不能被“新实例默认 100 %”当成未开始。
+    source.setParameter("scan", 1.0f);
+    juce::MemoryBlock endState;
+    source.getStateInformation(endState);
+    {
+        TranscriptionAudioProcessor reopened;
+        reopened.setStateInformation(endState.getData(), static_cast<int>(endState.getSize()));
+        std::unique_ptr<juce::AudioProcessorEditor> editor(reopened.createEditor());
+        auto* scene = findScene(*editor);
+        tick();
+        check(scene != nullptr && scene->progress() > 0.98f,
+              "a saved 100 % position restores when state arrives before opening");
+    }
+    {
+        TranscriptionAudioProcessor live;
+        live.loadPreset(1);
+        std::unique_ptr<juce::AudioProcessorEditor> editor(live.createEditor());
+        auto* scene = findScene(*editor);
+        tick();
+        live.setStateInformation(endState.getData(), static_cast<int>(endState.getSize()));
+        tick();
+        check(scene != nullptr && scene->progress() > 0.98f,
+              "a saved 100 % position follows a late state restore");
+    }
+    // 真正的新实例仍然停在待机，而不是被默认 100 % 拽到末端。
+    {
+        TranscriptionAudioProcessor untouched;
+        untouched.loadPreset(1);
+        std::unique_ptr<juce::AudioProcessorEditor> editor(untouched.createEditor());
+        auto* scene = findScene(*editor);
+        tick();
+        check(scene != nullptr && scene->progress() < 0.01f,
+              "a fresh instance still opens at the ready state");
+    }
+}
 void stateTests()
 {
     TranscriptionAudioProcessor fresh;
-    check(fresh.currentGenome().dna() == "ATGTGA" && fresh.currentGenome().codons() == 2
-              && fresh.matchingPreset() == transcription::presetCount - 1,
-          "a new instance starts from the minimal start + stop frame");
+    check(fresh.currentGenome() == transcription::presetGenome(transcription::defaultPresetIndex)
+        && fresh.matchingPreset() == transcription::defaultPresetIndex
+        && fresh.getCurrentProgram() == transcription::defaultPresetIndex,
+        "a new instance starts from the Insulin default preset");
 
     TranscriptionAudioProcessor source;
     source.loadPreset(2);
     auto genome = source.currentGenome(); genome.setIntron(3, 9, true); genome.erase(31);
-    source.setGenome(genome); source.setParameter("precision", 0.333f); source.setParameter("output", -12.5f);
+    source.setGenome(genome);
     source.editorWidth.store(1025); source.editorTab.store(1);
     const auto stored = source.currentGenome();
     juce::MemoryBlock saved; source.getStateInformation(saved);
     TranscriptionAudioProcessor restored;
     restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
     check(restored.currentGenome() == stored, "DNA and per-base splice flags survive host state");
-    check(transcription::sameControls(restored.currentControls(), source.currentControls()), "all seven parameters survive host state");
+
+    check(fresh.getParameters().size() == 1 && fresh.parameters.getParameter("scan") != nullptr,
+          "only the transcription progress parameter is exposed to the host");
+
+    // scan 参数：随工程保存，并且是音频引擎真正使用的转录进度。
+    restored.setParameter("scan", 0.42f);
+    juce::MemoryBlock withScan;
+    restored.getStateInformation(withScan);
+    TranscriptionAudioProcessor scanTarget;
+    scanTarget.setStateInformation(withScan.getData(), static_cast<int>(withScan.getSize()));
+    check(std::abs(scanTarget.parameters.getParameter("scan")->getValue() - 0.42f) < 0.01f,
+          "transcription progress is saved with the project state");
+    scanTarget.prepareToPlay(48000.0, 256);
+    juce::AudioBuffer<float> scanBlock(2, 256);
+    scanBlock.clear();
+    juce::MidiBuffer scanMidi;
+    scanTarget.processBlock(scanBlock, scanMidi);
+    check(std::abs(scanTarget.scanPhase.load() - 0.42f) < 0.01f,
+          "the scan parameter drives the engine progress");
+
+    // 旧工程（参数树里没有 scan 字段）仍然可以恢复，进度复位到 0。
+    if (auto xml = juce::AudioProcessor::getXmlFromBinary(withScan.getData(), static_cast<int>(withScan.getSize())))
+    {
+        if (auto* params = xml->getChildByName("TranscriptionParameters"))
+            if (auto* entry = params->getChildByAttribute("id", "scan"))
+                params->removeChildElement(entry, true);
+        juce::MemoryBlock legacy;
+        juce::AudioProcessor::copyXmlToBinary(*xml, legacy);
+        TranscriptionAudioProcessor legacyTarget;
+        legacyTarget.setParameter("scan", 0.8f);
+        legacyTarget.setStateInformation(legacy.getData(), static_cast<int>(legacy.getSize()));
+        check(std::abs(legacyTarget.parameters.getParameter("scan")->getValue()) < 0.001f
+              && legacyTarget.currentGenome() == stored,
+              "legacy states without the scan field restore the DNA and reset the progress");
+    }
     check(restored.editorWidth.load() == 1025 && restored.editorTab.load() == 1, "window width and tab survive host state");
     check(restored.getCurrentProgram() == 2, "factory program context survives host state");
     restored.prepareToPlay(48000, 256);
@@ -347,6 +458,8 @@ void stateTests()
 bool snapshot(const juce::File& file, int mode)
 {
     TranscriptionAudioProcessor processor;
+    processor.suppressOnboarding.store(mode != 10);   // 10 = 专门渲染首次引导的那一张
+    processor.forceOnboarding.store(mode == 10);
     if (mode == 6) processor.loadPreset(0);   // 长序列（Central Dogma）：验证 DNA 链变长后的滚动与端点标记
     if (mode == 7)   // 塑形中间态：core=3、body=1，停在核心窗口内，噪声与谐波同屏
     {
@@ -458,10 +571,11 @@ int main(int argc, char* argv[])
         if (option == "--carving-snapshot") return snapshot(file, 7) ? 0 : 1;
         if (option == "--spectrum-snapshot") return snapshot(file, 8) ? 0 : 1;
         if (option == "--noise-spectrum-snapshot") return snapshot(file, 9) ? 0 : 1;
+        if (option == "--onboarding-snapshot") return snapshot(file, 10) ? 0 : 1;
         if (option == "--audio-preview") return audioPreview(file) ? 0 : 1;
         return 2;
     }
-    interactionTests(); processTests(); pickerTests(); openEditorStateTests(); stateTests();
+    interactionTests(); processTests(); pickerTests(); openEditorStateTests(); scanRestoreUiTest(); stateTests();
     if (failures != 0) return 1;
     std::cout << "PASS: whole-codon editing, transcription stages, polymerase dragging, simplified UI, state and MIDI\n";
     return 0;

@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include <algorithm>
+#include <cmath>
 
 using namespace transcription;
 namespace ui = transcription::ui;
@@ -28,6 +29,15 @@ const std::array<juce::String, 61> allCodingCodons = []
     }
     return out;
 }();
+juce::PropertiesFile::Options onboardingOptions()
+{
+    juce::PropertiesFile::Options options;
+    options.applicationName = "Transcription";
+    options.folderName = "iisaacbeats";
+    options.filenameSuffix = "settings";
+    options.osxLibrarySubFolder = "Application Support";
+    return options;
+}
 const char* phaseName(GeneCanvas::Phase phase)
 {
     switch (phase)
@@ -217,8 +227,48 @@ bool CodonPicker::keyPressed(const juce::KeyPress& key)
     keyboardChoice = juce::jlimit(0, choiceCount() - 1, keyboardChoice + delta); repaint(); return true;
 }
 
+FirstRunHint::FirstRunHint()
+{
+    setInterceptsMouseClicks(false, false);   // 只是覆盖层，点击要穿透到转录按钮
+    setVisible(false);
+}
+void FirstRunHint::paint(juce::Graphics& g)
+{
+    const float scale = static_cast<float>(getWidth()) / 820.0f;
+    g.addTransform(juce::AffineTransform::scale(scale));
+    const float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(phase));
+
+    // 右下角按钮的呼吸描边
+    const juce::Rectangle<float> button(648.0f, 514.0f, 152.0f, 39.0f);
+    g.setColour(ui::green.withAlpha(0.06f + 0.10f * pulse));
+    g.fillRoundedRectangle(button, 6.0f);
+    g.setColour(ui::green.withAlpha(0.28f + 0.34f * pulse));
+    g.drawRoundedRectangle(button, 6.0f, 1.2f);
+
+    // 说明卡片放在按钮左侧，避免压住密码子卡片；右端小三角指向按钮。
+    const juce::Rectangle<float> card(286.0f, 512.0f, 350.0f, 40.0f);
+    juce::DropShadow(juce::Colours::black.withAlpha(0.08f), 14, { 0, 3 }).drawForRectangle(g, card.toNearestInt());
+    g.setColour(juce::Colours::white);
+    g.fillRoundedRectangle(card, 6.0f);
+    g.setColour(ui::green.withAlpha(0.55f));
+    g.drawRoundedRectangle(card, 6.0f, 1.0f);
+    ui::text(g, "Press Start transcription", { card.getX() + 14, card.getY() + 5, card.getWidth() - 28, 16 },
+             11.0f, ui::ink);
+    ui::text(g, "C5 is held for you - listen to the timbre change.",
+             { card.getX() + 14, card.getY() + 21, card.getWidth() - 28, 14 }, 8.5f, ui::muted);
+
+    juce::Path pointer;
+    pointer.startNewSubPath(636.0f, 526.0f);
+    pointer.lineTo(636.0f, 538.0f);
+    pointer.lineTo(646.0f, 532.0f);
+    pointer.closeSubPath();
+    g.setColour(juce::Colours::white);
+    g.fillPath(pointer);
+    g.setColour(ui::green.withAlpha(0.55f));
+    g.strokePath(pointer, juce::PathStrokeType(1.0f));
+}
 TranscriptionAudioProcessorEditor::TranscriptionAudioProcessorEditor(TranscriptionAudioProcessor& p)
-    : AudioProcessorEditor(p), processor(p), tooltips(this, 700)
+    : AudioProcessorEditor(p), processor(p), tooltips(this, 700), settings(onboardingOptions())
 {
     setLookAndFeel(&lookAndFeel);
     setWantsKeyboardFocus(true);
@@ -231,7 +281,24 @@ TranscriptionAudioProcessorEditor::TranscriptionAudioProcessorEditor(Transcripti
     transport.setTooltip(juce::String::fromUTF8("Play or pause the transcription animation. Visual only: does not trigger notes or change the sound engine."));
     preset.onClick = [this] { showPresets(); };
     more.onClick = [this] { showMore(); };
-    transport.onClick = [this] { canvas.toggleRunning(); };
+    transport.onClick = [this]
+    {
+        const bool wasRunning = canvas.isRunning();
+        canvas.toggleRunning();
+        if (onboarding && !wasRunning && canvas.isRunning())
+        {
+            // 首次引导：用户按下转录的同时，自动按住 C5 让音色变化可听。
+            onboarding = false;
+            hint.setVisible(false);
+            settings.setValue("onboardingDone", true);
+            settings.saveIfNeeded();
+            processor.transportUsed.store(true);
+            if (scanParameter != nullptr) scanParameter->setValueNotifyingHost(canvas.scanPhase());
+            processor.keyboardState.noteOn(1, 72, 0.85f);   // C5
+            demoNoteHeld = true;
+            demoNoteStarted = juce::Time::getMillisecondCounterHiRes();
+        }
+    };
     addAndMakeVisible(canvas);
     canvas.onEdit = [this](const Genome& next) { applyEdit(next); };
     canvas.onChooseCodon = [this](int index, bool insert) { picker.open(index, processor.currentGenome(), CodonPicker::Mode::amino, insert); };
@@ -247,6 +314,25 @@ TranscriptionAudioProcessorEditor::TranscriptionAudioProcessorEditor(Transcripti
     picker.onRemove = [this](int index) { canvas.removeCodon(index); };
     genome = processor.currentGenome(); canvas.setData(genome);
     lastRevision = processor.revision();
+    addChildComponent(hint);
+    // 转录进度来自 scan 参数：打开界面时先恢复到宿主保存的位置，再判断是否显示首次引导。
+    scanParameter = processor.parameters.getParameter("scan");
+    const float parameterValue = scanParameter != nullptr ? scanParameter->getValue() : 0.0f;
+    const bool freshInstance = !processor.stateRestored.load() && !processor.transportUsed.load()
+                               && parameterValue > 0.999f;
+    // 全新实例（宿主没有恢复过工程）第一次打开界面时从待机开始；恢复的工程严格按保存的进度。
+    // 音频参数保持 100 %，直到用户真正开始转录，避免只是打开一下界面就改成 0 %。
+    if (freshInstance) canvas.resetProcess();
+    else if (parameterValue > 0.001f) canvas.seek(parameterValue);
+    const float visualProgress = freshInstance ? 0.0f : parameterValue;
+    lastScanWritten = parameterValue;   // 必须是参数的真实值，否则第一帧会被误判为“外部改动”
+    lastScanWriteMs = juce::Time::getMillisecondCounterHiRes();
+    onboarding = !processor.suppressOnboarding.load()
+                 && (processor.forceOnboarding.load() || !settings.getBoolValue("onboardingDone", false))
+                 && visualProgress < 0.02f
+                 && processor.matchingPreset() == transcription::defaultPresetIndex;
+    hint.setVisible(onboarding);
+    if (onboarding) hint.toFront(false);
     const int width = juce::jlimit(615, 1640, processor.editorWidth.load());
     setResizable(true, false); setResizeLimits(615, 420, 1640, 1120);
     if (auto* constraint = getConstrainer()) constraint->setFixedAspectRatio(820.0 / 560.0);
@@ -257,6 +343,7 @@ TranscriptionAudioProcessorEditor::TranscriptionAudioProcessorEditor(Transcripti
 TranscriptionAudioProcessorEditor::~TranscriptionAudioProcessorEditor()
 {
     stopTimer();
+    if (demoNoteHeld) processor.keyboardState.noteOff(1, 72, 0.0f);
     juce::PopupMenu::dismissAllActiveMenus();
     setLookAndFeel(nullptr);
 }
@@ -281,6 +368,7 @@ void TranscriptionAudioProcessorEditor::resized()
     more.setBounds(bounds(756, 9, 40, 29));
     canvas.setBounds(bounds(24, 126, 772, 382));
     transport.setBounds(bounds(651, 518, 145, 31));
+    hint.setBounds(getLocalBounds());
     picker.setBounds(getLocalBounds());
 }
 void TranscriptionAudioProcessorEditor::updateAction()
@@ -295,7 +383,6 @@ void TranscriptionAudioProcessorEditor::showPresets()
 {
     juce::PopupMenu menu;
     menu.setLookAndFeel(&lookAndFeel);
-    menu.addSectionHeader(juce::String::fromUTF8("Choose a gene fragment"));
     const int current = processor.matchingPreset();
     for (int i = 0; i < presetCount; ++i) menu.addItem(i + 1, factoryPresets()[static_cast<size_t>(i)].name, true, current == i);
     const juce::Component::SafePointer<TranscriptionAudioProcessorEditor> safe(this);
@@ -311,9 +398,7 @@ void TranscriptionAudioProcessorEditor::showMore()
     menu.addSeparator();
     menu.addItem(3, juce::String::fromUTF8("Reset transcription"));
     menu.addItem(4, juce::String::fromUTF8("Clear middle codons"), genome.codons() > 2);
-    menu.addSeparator();
-    menu.addSectionHeader(juce::String::fromUTF8("Visual model: DNA → RNA, not protein translation."));
-    menu.addSectionHeader(juce::String::fromUTF8("Start (ATG) and stop codons are fixed boundaries."));
+    menu.addItem(5, juce::String::fromUTF8("Show intro again"));
     const juce::Component::SafePointer<TranscriptionAudioProcessorEditor> safe(this);
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&more), [safe](int result)
     {
@@ -321,7 +406,25 @@ void TranscriptionAudioProcessorEditor::showMore()
         if (result == 1 || result == 2) safe->undoEdit(result == 2);
         if (result == 3) safe->canvas.resetProcess();
         if (result == 4) safe->applyEdit(Genome::minimal());
+        if (result == 5) safe->showIntro();
     });
+}
+void TranscriptionAudioProcessorEditor::showIntro()
+{
+    // 手动重放首次引导：回到待机、显示说明卡，并把持久化标记清零，
+    // 这样即使关掉再开也会像首次安装一样出现。
+    if (demoNoteHeld)
+    {
+        processor.keyboardState.noteOff(1, 72, 0.0f);
+        demoNoteHeld = false;
+    }
+    canvas.resetProcess();
+    updateAction();
+    onboarding = true;
+    hint.setVisible(true);
+    hint.toFront(false);
+    settings.setValue("onboardingDone", false);
+    settings.saveIfNeeded();
 }
 void TranscriptionAudioProcessorEditor::choosePreset(int index)
 {
@@ -366,6 +469,21 @@ void TranscriptionAudioProcessorEditor::timerCallback()
     const int current = processor.matchingPreset();
     preset.setButtonText(juce::String::fromUTF8(current >= 0 ? factoryPresets()[static_cast<size_t>(current)].name : "Custom fragment"));
     preset.setTooltip(juce::String::fromUTF8(current >= 0 ? factoryPresets()[static_cast<size_t>(current)].source : "Choose a gene fragment"));
+    if (onboarding)
+        hint.setPhase(now * 0.006);
+    // 首次引导自动按住的 C5：正常完成后再留 1.5 s；一旦用户打断（暂停 / 点击画布等）
+    // 立刻松开，最多 22 s 兜底。
+    if (demoNoteHeld)
+    {
+        const auto phase = canvas.phase();
+        const bool finished = phase == GeneCanvas::Phase::complete && now - demoNoteStarted > 1500.0;
+        const bool interrupted = !canvas.isRunning() && phase != GeneCanvas::Phase::complete;
+        if (finished || interrupted || now - demoNoteStarted > 22000.0)
+        {
+            processor.keyboardState.noteOff(1, 72, 0.0f);
+            demoNoteHeld = false;
+        }
+    }
     canvas.advance(delta);
     canvas.setOutputLevel(processor.outputPeak());
     {
@@ -374,7 +492,48 @@ void TranscriptionAudioProcessorEditor::timerCallback()
             bands[static_cast<size_t>(i)] = processor.spectrumBandDb(i);
         canvas.setSpectrum(bands);
     }
-    processor.scanPhase.store(canvas.scanPhase(), std::memory_order_relaxed);
+    // 转录进度与宿主参数双向同步：
+    //  - 动画在跑/被拖动 → 把位置写给 scan 参数（节流 60 ms，完成时补一次）；
+    //  - 参数被自动化或工程恢复改写 → 动画直接 seek 到该位置。
+    if (scanParameter != nullptr)
+    {
+        const float hostValue = scanParameter->getValue();
+        const float local = canvas.scanPhase();
+        const bool driving = canvas.isRunning() || canvas.isDragging();
+        if (driving)
+        {
+            if (now - lastScanWriteMs > 60.0 || std::abs(local - hostValue) > 0.02f)
+            {
+                scanParameter->setValueNotifyingHost(local);
+                lastScanWritten = local;
+                lastScanWriteMs = now;
+                processor.transportUsed.store(true);
+            }
+        }
+        else
+        {
+            // 未播放时以参数为准：无论宿主是“先恢复再开界面”还是“开界面后才恢复”，
+            // 只要参数与画布位置不一致就把聚合酶移过去（新实例的默认 100 % 除外）。
+            // 新实例的默认 100 % 不应把界面拽到“转录完成”；但工程恢复出来的 100 %、
+            // 或用户自己拖到过 100 %，都必须还原到末端。
+            const bool pendingFresh = !processor.stateRestored.load() && !processor.transportUsed.load()
+                                      && hostValue > 0.999f;
+            if (!pendingFresh && std::abs(local - hostValue) > 0.002f)
+            {
+                canvas.seek(hostValue);
+                lastScanWritten = hostValue;
+                lastScanWriteMs = now;
+            }
+            else if (wasDriving && std::abs(local - hostValue) > 0.0005f)
+            {
+                // 动画刚停下 / 完成：补写最后一帧，保证工程保存的是准确进度。
+                scanParameter->setValueNotifyingHost(local);
+                lastScanWritten = local;
+                lastScanWriteMs = now;
+            }
+        }
+        wasDriving = driving;
+    }
     repaint();
 }
 void TranscriptionAudioProcessorEditor::drawStages(juce::Graphics& g)

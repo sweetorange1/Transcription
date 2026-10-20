@@ -4,6 +4,7 @@
 #include "Parameters.h"
 #include "Presets.h"
 #include "Spectrum.h"
+#include "Dsp/TranscriptionEngine.h"
 
 class TranscriptionAudioProcessor final : public juce::AudioProcessor
 {
@@ -34,7 +35,6 @@ public:
 
     transcription::Genome currentGenome() const;
     bool setGenome(const transcription::Genome& genome);
-    transcription::Controls currentControls() const noexcept { return parameterRefs.read(); }
     int matchingPreset() const;
     void loadPreset(int index);
     void setParameter(const juce::String& id, float value);
@@ -51,19 +51,24 @@ public:
     juce::AudioProcessorValueTreeState parameters;
     juce::MidiKeyboardState keyboardState;
     std::atomic<int> editorWidth { 820 }, editorTab { 0 };
-    std::atomic<float> scanPhase { 1.0f };   // 全局转录进度 [0,1]，由编辑器动画写入
+    std::atomic<float> scanPhase { 1.0f };   // 当前生效的转录进度 [0,1]（每块从 scan 参数刷新）
+    std::atomic<bool> suppressOnboarding { false };   // 离线截图 / 自动化测试时关闭首次引导
+    std::atomic<bool> forceOnboarding { false };      // 忽略已引导标记，强制渲染引导（截图用）
+    std::atomic<bool> stateRestored { false };        // 宿主是否恢复过工程状态（编辑器据此决定初始位置）
+    std::atomic<bool> transportUsed { false };        // 本次实例里用户是否真正驱动过转录（拖动/播放）
 
 private:
+    static constexpr const char* scanParameterId = "scan";
+    juce::RangedAudioParameter* scanParameter = nullptr;
     void handleMidi(const juce::MidiMessage& message) noexcept;
     void analyseSpectrum(const float* left, const float* right, int samples) noexcept;
-    transcription::ParameterRefs parameterRefs;
     mutable juce::CriticalSection modelMutex;
     transcription::Genome genome, audioGenome;
     transcription::GenomeMailbox mailbox;
     transcription::Engine engine;
     std::uint32_t audioVersion = 0;
     std::atomic<std::uint32_t> modelRevision { 0 };
-    std::atomic<int> lastPreset { 0 }, voiceMeter { 0 };
+    std::atomic<int> lastPreset { transcription::defaultPresetIndex }, voiceMeter { 0 };
     std::atomic<float> meter { 0.0f };
 
     // 频谱分析：4096 点 Hann 窗 FFT（Δf≈11.7 Hz @48k），每 512 采样计算一次，压成 96 个对数频段。

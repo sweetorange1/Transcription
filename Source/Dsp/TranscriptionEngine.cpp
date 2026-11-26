@@ -60,9 +60,9 @@ void Engine::prepare(double rate) noexcept
     smoothing = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.004)));
     dcPole = static_cast<float>(std::exp(-2.0 * pi * 2.0 / sampleRate));
     stealSamples = static_cast<int>(sampleRate * 0.005);
-    agcAttack = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.2)));
-    agcRelease = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.2)));   // 对称慢速，追踪平均能量而非窄带峰值
-    agcSmooth = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.05)));
+    agcAttack = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.12)));
+    agcRelease = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.22)));   // 温和慢速，起音平稳不撞限幅
+    agcSmooth = static_cast<float>(1.0 - std::exp(-1.0 / (sampleRate * 0.04)));
     for (auto& voice : voices) voice.core.prepare(sampleRate);
     body.prepare(sampleRate);
     reset();
@@ -92,7 +92,20 @@ void Engine::setScanPhase(float phase) noexcept
 void Engine::refresh(Voice& voice, bool snap) noexcept
 {
     const auto ch = static_cast<size_t>(voice.channel);
-    voice.f0 = 440.0f * std::pow(2.0f, (static_cast<float>(voice.note - 69) + bend[ch] * 2.0f) / 12.0f);
+    // body 区活跃时引入极克制的延迟淡入有机呼吸颤音（±2..11 cents，0.45s 渐入），赋予长音生命力。
+    float vibratoSemitones = 0.0f;
+    const float bodyInfluence = transcript.bodyCount > 0 ? bodyWetPhase * transcript.fxGrowth : 0.0f;
+    if (!snap && bodyInfluence > 0.01f && transcript.coreCount > 0)
+    {
+        const float delayEnv = smoothstep(0.25f, 1.15f, voice.noteSeconds);
+        const float rateHz = 3.4f + 2.4f * transcript.fxBreath;
+        const float depthCents = (2.5f + 8.5f * transcript.fxMotion * (0.4f + 0.6f * transcript.coreEnsemble))
+            * bodyInfluence * delayEnv;
+        voice.vibratoPhase += rateHz * 64.0f / static_cast<float>(sampleRate);
+        if (voice.vibratoPhase >= 1.0f) voice.vibratoPhase -= std::floor(voice.vibratoPhase);
+        vibratoSemitones = std::sin(static_cast<float>(2.0 * pi) * voice.vibratoPhase) * (depthCents / 100.0f);
+    }
+    voice.f0 = 440.0f * std::pow(2.0f, (static_cast<float>(voice.note - 69) + bend[ch] * 2.0f + vibratoSemitones) / 12.0f);
     const auto& env = transcript.envelope;
     voice.attackStep = 1.0f / (std::max(0.002f, env.attack) * static_cast<float>(sampleRate));
     voice.decayMultiplier = static_cast<float>(std::exp(-7.0 / (std::max(0.01f, env.decay) * sampleRate)));
@@ -100,15 +113,34 @@ void Engine::refresh(Voice& voice, bool snap) noexcept
     voice.sustain = std::clamp(env.sustain, 0.0f, 1.0f);
     voice.targetChannelGain = volume[ch] * expression[ch];
 
+    // 动态音符频谱演化：随音符持续时间平滑开合低通与共振峰，避免静止嗡鸣。
+    // morph > 0：起音清亮晶脆，0.55s 内柔缓收拢（竖琴/玻璃钟感）；
+    // morph < 0：起音温润如雾，0.65s 内泛音逐渐绽放（弓弦/人声感）。
+    const float evolve = 1.0f - std::exp(-voice.noteSeconds / (transcript.coreMorph >= 0.0f ? 0.42f : 0.65f));
+    const float cutoffScale = transcript.coreMorph >= 0.0f
+        ? (1.0f + transcript.coreMorph * (0.65f * (1.0f - evolve) - 0.15f * evolve))
+        : (1.0f + (-transcript.coreMorph) * (-0.38f * (1.0f - evolve) + 0.25f * evolve));
+    // body 序列酸碱色泽与芳香微光反哺核心音色，仅在转录进入 body 区后逐步生效。
+    const float bodyToneFactor = std::exp2(transcript.fxTone * 0.48f * bodyInfluence);
+    const float bodyBrightShift = (0.18f * transcript.fxTone + 0.20f * transcript.fxShimmer) * bodyInfluence;
+
     CoreParams core;
     core.harmonics = transcript.coreHarmonics;
     core.resonance = transcript.coreResonance;
-    core.cutoff = transcript.coreCutoff;
-    core.slope = transcript.coreSlope;
-    core.formant = transcript.coreFormant;
+    core.cutoff = std::clamp(transcript.coreCutoff * cutoffScale * bodyToneFactor, 450.0f, 19000.0f);
+    core.slope = std::clamp(transcript.coreSlope - 2.4f * transcript.fxTone * bodyInfluence - 1.8f * transcript.fxShimmer * bodyInfluence, 3.8f, 22.0f);
+    core.formant = std::clamp(transcript.coreFormant * std::exp2(transcript.fxTone * 0.22f * bodyInfluence), 220.0f, 2600.0f);
+    core.formant2 = std::clamp(transcript.coreFormant2 * std::exp2(transcript.fxTone * 0.28f * bodyInfluence), 780.0f, 5200.0f);
     core.formantAmt = transcript.coreFormantAmt;
     core.oddEven = transcript.coreOddEven;
     core.drive = transcript.coreDrive;
+    core.brightness = std::clamp(transcript.coreBrightness + bodyBrightShift, 0.0f, 1.0f);
+    core.inharmonicity = std::clamp(transcript.coreInharmonicity + 0.22f * transcript.fxShimmer * bodyInfluence, 0.0f, 1.0f);
+    core.air = std::clamp(transcript.coreAir + 0.18f * transcript.fxBreath * bodyInfluence, 0.0f, 1.0f);
+    core.ensemble = std::clamp(transcript.coreEnsemble + 0.25f * transcript.fxMotion * bodyInfluence, 0.0f, 1.0f);
+    core.fifthLift = std::clamp(transcript.coreFifthLift + 0.35f * transcript.fxShimmer * bodyInfluence, 0.0f, 1.0f);
+    core.subWarmth = std::clamp(transcript.coreSubWarmth - 0.30f * transcript.fxTone * bodyInfluence, 0.0f, 1.0f);
+    core.presence = std::clamp(transcript.corePresence + (0.28f * transcript.fxTone + 0.26f * transcript.fxShimmer) * bodyInfluence, 0.0f, 1.0f);
     // snap 只在 noteOn 时为 true：新音符必须从正确的带通系数起步（见 SubtractiveCore::setParameters）。
     voice.core.setParameters(sampleRate, voice.f0, core, snap);
 
@@ -151,6 +183,7 @@ void Engine::updateBodyActivation() noexcept
         }
         wet = smoothstep(firstWetCodon, lastWetCodon, position);
     }
+    bodyWetPhase = transcript.bodyCount > 0 ? wet : 0.0f;
     body.setActivation(activation);
     body.setWet(wet);
 }
@@ -180,9 +213,12 @@ void Engine::noteOn(int channel, int note, float velocity) noexcept
     chosen->age = ++serial;
     chosen->random = 0x9e3779b9u ^ static_cast<std::uint32_t>(serial * 747796405u) ^ static_cast<std::uint32_t>(note * 2891336453u);
     if (chosen->random == 0) chosen->random = 1;
+    chosen->vibratoPhase = static_cast<float>(chosen->random & 0xfffu) / 4096.0f;
+    chosen->noteSeconds = 0.0f;
     chosen->velocity = std::pow(std::clamp(velocity, 0.0f, 1.0f), 1.4f);
     chosen->stage = Stage::attack;
     if (stealing) { chosen->stolenL = oldL; chosen->stolenR = oldR; chosen->stealRemaining = stealSamples; }
+    updateBodyActivation();
     refresh(*chosen, true);
 }
 void Engine::noteOff(int channel, int note) noexcept
@@ -243,17 +279,19 @@ void Engine::render(float* left, float* right, int samples) noexcept
     {
         if (refreshCountdown <= 0)
         {
-            for (auto& voice : voices) if (voice.stage != Stage::idle) refresh(voice, false);
             updateBodyActivation();
+            for (auto& voice : voices) if (voice.stage != Stage::idle) refresh(voice, false);
             refreshCountdown = 64;
         }
         --refreshCountdown;
         float l = 0.0f, r = 0.0f;
         bool anySignal = false;
+        const float dtSample = 1.0f / static_cast<float>(sampleRate);
         for (auto& voice : voices)
         {
             if (voice.stage == Stage::idle) continue;
             anySignal = true;
+            voice.noteSeconds += dtSample;
             const float noise = voice.noise();
             const float envelope = voice.nextEnvelope() * voice.velocity;
             float mono = voice.core.process(noise, voice.coreActivation);

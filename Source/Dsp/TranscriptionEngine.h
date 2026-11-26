@@ -40,6 +40,8 @@ private:
         float attackStep = 0.01f, decayMultiplier = 0.999f, releaseMultiplier = 0.999f;
         float sustain = 0.7f, channelGain = 1.0f, targetChannelGain = 1.0f;
         float f0 = 440.0f;
+        float noteSeconds = 0.0f;        // 音符持续时间，驱动动态频谱演化与柔和延迟颤音
+        float vibratoPhase = 0.0f;
         std::array<float, 4> coreActivation { 0.0f, 0.0f, 0.0f, 0.0f };
         float lastL = 0.0f, lastR = 0.0f, stolenL = 0.0f, stolenR = 0.0f;
         int stealRemaining = 0;
@@ -58,8 +60,9 @@ private:
     double sampleRate = 44100.0;
     float smoothing = 0.005f, dcPole = 0.999f;
     float scanPhase = 1.0f;         // 无编辑器时默认 complete（完整音色）
+    float bodyWetPhase = 0.0f;      // body 区湿音激活进度 [0,1]，用于控制 body 对核心的温和反哺
     float rmsFollower = 0.0f, autoGain = 1.0f;
-    float agcAttack = 0.01f, agcRelease = 0.005f, agcSmooth = 0.02f, targetRms = 0.12f;
+    float agcAttack = 0.01f, agcRelease = 0.005f, agcSmooth = 0.02f, targetRms = 0.095f;
     std::array<float, 2> dcInput {}, dcOutput {};
     std::uint64_t serial = 0;
     int refreshCountdown = 0, stealSamples = 220;

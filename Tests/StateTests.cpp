@@ -552,6 +552,65 @@ bool audioPreview(const juce::File& file)
     }
     return true;
 }
+bool timbreShowcase(const juce::File& file)
+{
+    constexpr int rate = 48000, blockSize = 256, secondsPerClip = 4;
+    const std::array<const char*, 8> sequences {{
+        // 0: Pure Gly flute (1 harmonic, airy minimal)
+        "ATG GGC GGC GGC GGC GGT GGC GCC GGT TGA",
+        // 1: Warm Cello/Even Cys-Leu-Lys (warm even partials, low resonant body)
+        "ATG TGC CTG AAG CTG TGC AAG CGT CTG AAG TGA",
+        // 2: Hollow Clarinet Pro-Pro-Val (odd harmonics, woodwind)
+        "ATG CCG CCC GTG CCG CCC GTT GCT CCG GTT TGA",
+        // 3: Crystalline Celesta Trp-Tyr-Phe (aromatic inharmonicity + shimmer)
+        "ATG TGG TAC TTC TTC TGG TAC CAC CCG TTC TAG",
+        // 4: Acidic Glass Choir Asp-Glu-Ser (bright full 8-harmonic upper partials)
+        "ATG GAT GAA AGC GAA GAT TCT ACC GAA GAC TGA",
+        // 5: Pad Nebula (same rich gene, TAA stop)
+        "ATG TGG TAC TTC TTC TGG TAC CAC CCG TTC TAA",
+        // 6: Pluck Spore (Insulin sequence with TAG stop)
+        "ATG GCC CTG TGG ATG CGC CTC CTG CCC CTG CTG GCG CTG CTG GCC CTC TGG GGA CCT GAC CCA GCC GCA GCC TTT GTG AAC CAA CAC CTG TGC TAG",
+        // 7: GFP Fluorescence (bright polar-charged real gene)
+        "ATG AGT AAA GGA GAA GAA CTT TTC ACT GGA GTT GTC CCA ATT CTT GTT GAA TTA GAT GGT GAT GTT AAT GGG CAC AAA TTT TCT GTC AGT GGA TGA"
+    }};
+    TranscriptionAudioProcessor processor;
+    processor.prepareToPlay(rate, blockSize);
+    auto fileStream = file.createOutputStream();
+    if (fileStream == nullptr || !fileStream->setPosition(0) || fileStream->truncate().failed()) return false;
+    std::unique_ptr<juce::OutputStream> stream = std::move(fileStream);
+    juce::WavAudioFormat format;
+    auto writer = format.createWriterFor(stream, juce::AudioFormatWriterOptions()
+        .withSampleRate(rate).withNumChannels(2).withBitsPerSample(24));
+    if (writer == nullptr) return false;
+    juce::AudioBuffer<float> buffer(2, blockSize);
+    for (const auto* seq : sequences)
+    {
+        transcription::Genome g;
+        if (!transcription::Genome::parse(seq, g)) return false;
+        processor.reset();
+        processor.setGenome(g);
+        int position = 0;
+        while (position < secondsPerClip * rate)
+        {
+            const int length = juce::jmin(blockSize, secondsPerClip * rate - position);
+            buffer.setSize(2, length, false, false, true);
+            juce::MidiBuffer midi;
+            if (position == 0)
+            {
+                midi.addEvent(juce::MidiMessage::noteOn(1, 60, 0.85f), 0);
+                midi.addEvent(juce::MidiMessage::noteOn(1, 67, 0.72f), 0);
+                midi.addEvent(juce::MidiMessage::noteOn(1, 76, 0.64f), 0);
+            }
+            const int release = static_cast<int>(rate * 2.4);
+            if (position <= release && position + length > release)
+                for (int note : { 60, 67, 76 }) midi.addEvent(juce::MidiMessage::noteOff(1, note), release - position);
+            processor.processBlock(buffer, midi);
+            if (!writer->writeFromAudioSampleBuffer(buffer, 0, length)) return false;
+            position += length;
+        }
+    }
+    return true;
+}
 }
 int main(int argc, char* argv[])
 {
@@ -573,6 +632,7 @@ int main(int argc, char* argv[])
         if (option == "--noise-spectrum-snapshot") return snapshot(file, 9) ? 0 : 1;
         if (option == "--onboarding-snapshot") return snapshot(file, 10) ? 0 : 1;
         if (option == "--audio-preview") return audioPreview(file) ? 0 : 1;
+        if (option == "--timbre-showcase") return timbreShowcase(file) ? 0 : 1;
         return 2;
     }
     interactionTests(); processTests(); pickerTests(); openEditorStateTests(); scanRestoreUiTest(); stateTests();

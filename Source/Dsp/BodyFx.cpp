@@ -92,34 +92,34 @@ void NebulaChain::reset() noexcept
 void NebulaChain::configure(const Genes& g, bool snap) noexcept
 {
     const double controlRate = sampleRate / controlInterval;
-    breathCut.aim(2400.0f * brightness(g.tone, 0.75f), snap);
-    breathDepth.aim(0.55f + 0.65f * g.motion, snap);
-    swellDepth.aim(0.035f + 0.06f * g.breath, snap);
-    const double breathHz = (0.07 + 0.2 * g.breath) * (1.0 + 0.15 * g.jitter(1));
+    breathCut.aim(2600.0f * brightness(g.tone, 0.95f), snap);
+    breathDepth.aim(0.65f + 0.80f * g.motion, snap);
+    swellDepth.aim(0.04f + 0.07f * g.breath, snap);
+    const double breathHz = (0.06 + 0.24 * g.breath) * (1.0 + 0.18 * g.jitter(1));
     breathLfo.setRate(controlRate, breathHz);
     swellLfo.setRate(controlRate, breathHz * 0.77);
 
     constexpr std::array<float, 3> baseMs { 9.5f, 14.2f, 19.6f };
     for (size_t k = 0; k < ensembleBase.size(); ++k)
     {
-        ensembleBase[k].aim(baseMs[k] * (1.0f + 0.08f * g.jitter(10u + static_cast<std::uint32_t>(k))), snap);
-        ensembleLfo[k].setRate(sampleRate, (0.12 + 0.16 * g.motion) * (1.0 + 0.35 * g.jitter(20u + static_cast<std::uint32_t>(k))));
+        ensembleBase[k].aim(baseMs[k] * (1.0f + 0.10f * g.jitter(10u + static_cast<std::uint32_t>(k))), snap);
+        ensembleLfo[k].setRate(sampleRate, (0.12 + 0.20 * g.motion) * (1.0 + 0.35 * g.jitter(20u + static_cast<std::uint32_t>(k))));
     }
-    ensembleDepth.aim(1.0f + 2.6f * g.motion, snap);
+    ensembleDepth.aim(1.1f + 2.9f * g.motion, snap);
 
     ReverbSettings rs;
-    rs.decay = (3.0f + 5.0f * g.space) * (0.85f + 0.3f * g.growth);
+    rs.decay = (3.0f + 5.2f * g.space) * (0.85f + 0.3f * g.growth);
     rs.size = 1.05f + 0.55f * g.space;
     rs.predelay = 0.015f + 0.03f * g.space;
-    rs.damping = 5200.0f * brightness(g.tone, 0.8f);
+    rs.damping = 5600.0f * brightness(g.tone, 0.95f);
     rs.lowCut = 130.0f;
-    rs.modDepth = 0.35f + 0.9f * g.motion;
-    rs.modRate = 0.15f + 0.35f * g.breath;
-    rs.shimmer = (0.05f + 0.2f * g.shimmer) * (0.6f + 0.4f * g.growth);
+    rs.modDepth = 0.35f + 1.0f * g.motion;
+    rs.modRate = 0.15f + 0.38f * g.breath;
+    rs.shimmer = (0.04f + 0.24f * g.shimmer) * (0.6f + 0.4f * g.growth);
     rs.diffusion = 0.7f;
     hall.setTargets(rs, snap);
     hallMix.aim(0.36f + 0.22f * g.growth, snap);
-    halo.setTargets(1.2f + 0.3f * g.motion, 0.12f + 0.12f * std::max(0.0f, g.tone) + 0.06f * g.shimmer,
+    halo.setTargets(1.22f + 0.34f * g.motion, 0.14f + 0.18f * std::max(0.0f, g.tone) + 0.10f * g.shimmer,
                     0.05f + 0.05f * g.breath, 0.05f + 0.08f * g.breath, snap);
     if (snap) control();
 }
@@ -207,37 +207,37 @@ void SporeChain::reset() noexcept
 }
 void SporeChain::configure(const Genes& g, bool snap) noexcept
 {
-    const float spread = 0.8f + 0.5f * g.space;
+    const float spread = 0.72f + 0.62f * g.space;
     for (size_t k = 0; k < bloomLength.size(); ++k)
-        bloomLength[k].aim(bloomMs[k] * spread * (1.0f + 0.06f * g.jitter(30u + static_cast<std::uint32_t>(k))), snap);
-    bloomCoef.aim(0.5f + 0.18f * g.motion, snap);
-    bloomLfo.setRate(sampleRate / controlInterval, 0.15 + 0.3 * g.breath);
+        bloomLength[k].aim(bloomMs[k] * spread * (1.0f + 0.08f * g.jitter(30u + static_cast<std::uint32_t>(k))), snap);
+    bloomCoef.aim(0.46f + 0.24f * g.motion, snap);
+    bloomLfo.setRate(sampleRate / controlInterval, 0.15 + 0.34 * g.breath);
 
-    echoTime.aim((0.15f + 0.2f * g.space) * (1.0f + 0.06f * g.jitter(40)), snap);
-    echoRatio.aim(0.75f + 0.08f * g.jitter(41), snap);
-    echoFeedback.aim(0.32f + 0.3f * g.growth, snap);
-    echoWet.aim(0.24f + 0.12f * g.growth, snap);
-    wowDepth.aim(0.3f + 1.2f * g.motion, snap);
-    const double wowHz = 0.35 + 0.6 * g.breath;
+    echoTime.aim((0.14f + 0.24f * g.space) * (1.0f + 0.07f * g.jitter(40)), snap);
+    echoRatio.aim(0.75f + 0.09f * g.jitter(41), snap);
+    echoFeedback.aim(0.32f + 0.32f * g.growth, snap);
+    echoWet.aim(0.24f + 0.14f * g.growth, snap);
+    wowDepth.aim(0.25f + 1.35f * g.motion, snap);
+    const double wowHz = 0.35 + 0.65 * g.breath;
     wowL.setRate(sampleRate, wowHz * (1.0 + 0.2 * g.jitter(42)));
     wowR.setRate(sampleRate, wowHz * (1.0 + 0.2 * g.jitter(43)));
-    scatterCoef.aim(0.45f + 0.2f * g.motion, snap);
-    echoTone.aim(4200.0f * brightness(g.tone, 0.7f), snap);
+    scatterCoef.aim(0.42f + 0.26f * g.motion, snap);
+    echoTone.aim(4600.0f * brightness(g.tone, 0.92f), snap);
 
     ReverbSettings rs;
-    rs.decay = (1.1f + 2.2f * g.space) * (0.85f + 0.3f * g.growth);
-    rs.size = 0.55f + 0.35f * g.space;
+    rs.decay = (1.1f + 2.4f * g.space) * (0.85f + 0.3f * g.growth);
+    rs.size = 0.55f + 0.38f * g.space;
     rs.predelay = 0.006f + 0.012f * g.space;
-    rs.damping = 8500.0f * brightness(g.tone, 0.8f);
+    rs.damping = 9000.0f * brightness(g.tone, 0.92f);
     rs.lowCut = 170.0f;
-    rs.modDepth = 0.15f + 0.45f * g.motion;
-    rs.modRate = 0.45f + 0.6f * g.breath;
-    rs.shimmer = (0.03f + 0.14f * g.shimmer) * (0.5f + 0.5f * g.growth);
+    rs.modDepth = 0.15f + 0.52f * g.motion;
+    rs.modRate = 0.45f + 0.65 * g.breath;
+    rs.shimmer = (0.04f + 0.18f * g.shimmer) * (0.5f + 0.5f * g.growth);
     rs.diffusion = 0.72f;
     plate.setTargets(rs, snap);
-    plateMix.aim(0.22f + 0.12f * g.growth, snap);
-    halo.setTargets(1.15f + 0.25f * g.motion, 0.18f + 0.15f * std::max(0.0f, g.tone) + 0.08f * g.shimmer,
-                    0.04f + 0.04f * g.breath, 0.08f + 0.1f * g.breath, snap);
+    plateMix.aim(0.22f + 0.13f * g.growth, snap);
+    halo.setTargets(1.16f + 0.30f * g.motion, 0.18f + 0.20f * std::max(0.0f, g.tone) + 0.10f * g.shimmer,
+                    0.04f + 0.04f * g.breath, 0.08f + 0.10f * g.breath, snap);
     if (snap) control();
 }
 void SporeChain::control() noexcept
@@ -344,33 +344,34 @@ void VoiceChain::reset() noexcept
 }
 void VoiceChain::configure(const Genes& g, bool snap) noexcept
 {
-    vowelCenter.aim(std::clamp(2.0f + 1.3f * g.jitter(50), 0.6f, 3.4f), snap);
-    vowelSpan.aim(0.5f + 1.2f * g.motion, snap);
-    glowAmount.aim(0.9f + 0.7f * g.growth, snap);
-    formantShift.aim(brightness(g.tone, 0.3f), snap);
-    vowelLfo.setRate(sampleRate / controlInterval, (0.04 + 0.16 * g.breath) * (1.0 + 0.2 * g.jitter(51)));
+    // 元音空间中心由酸碱色泽 + 序列哈希共同决定：碱性偏暖厚 u/o，酸性/极性偏清亮 e/i，拉开不同基因声腔性格。
+    vowelCenter.aim(std::clamp(1.9f + 1.15f * g.tone + 0.75f * g.jitter(50), 0.3f, 3.6f), snap);
+    vowelSpan.aim(0.45f + 1.35f * g.motion, snap);
+    glowAmount.aim(0.75f + 0.85f * g.growth, snap);
+    formantShift.aim(brightness(g.tone, 0.42f), snap);
+    vowelLfo.setRate(sampleRate / controlInterval, (0.04 + 0.18 * g.breath) * (1.0 + 0.2 * g.jitter(51)));
 
-    doubleBaseL.aim(7.3f * (1.0f + 0.06f * g.jitter(52)), snap);
-    doubleBaseR.aim(11.9f * (1.0f + 0.06f * g.jitter(53)), snap);
-    doubleDepth.aim(0.15f + 0.45f * g.motion, snap);
+    doubleBaseL.aim(7.3f * (1.0f + 0.08f * g.jitter(52)), snap);
+    doubleBaseR.aim(11.9f * (1.0f + 0.08f * g.jitter(53)), snap);
+    doubleDepth.aim(0.18f + 0.55f * g.motion, snap);
     doubleL.setRate(sampleRate, 0.21 * (1.0 + 0.3 * g.jitter(54)));
     doubleR.setRate(sampleRate, 0.29 * (1.0 + 0.3 * g.jitter(55)));
 
-    echoTime.aim((0.29f + 0.17f * g.space) * (1.0f + 0.05f * g.jitter(56)), snap);
-    echoRatio.aim(1.33f + 0.06f * g.jitter(57), snap);
-    echoFeedback.aim(0.26f + 0.26f * g.growth, snap);
+    echoTime.aim((0.26f + 0.20f * g.space) * (1.0f + 0.06f * g.jitter(56)), snap);
+    echoRatio.aim(1.33f + 0.08f * g.jitter(57), snap);
+    echoFeedback.aim(0.26f + 0.28f * g.growth, snap);
     echoWet.aim(0.36f + 0.16f * g.growth, snap);
-    echoTone.aim(3000.0f * brightness(g.tone, 0.7f), snap);
+    echoTone.aim(3600.0f * brightness(g.tone, 0.90f), snap);
 
     ReverbSettings rs;
-    rs.decay = (2.0f + 3.2f * g.space) * (0.85f + 0.3f * g.growth);
+    rs.decay = (2.0f + 3.4f * g.space) * (0.85f + 0.3f * g.growth);
     rs.size = 0.85f + 0.5f * g.space;
     rs.predelay = 0.03f + 0.04f * g.space;
-    rs.damping = 6200.0f * brightness(g.tone, 0.8f);
+    rs.damping = 6600.0f * brightness(g.tone, 0.95f);
     rs.lowCut = 160.0f;
-    rs.modDepth = 0.3f + 0.7f * g.motion;
-    rs.modRate = 0.22f + 0.4f * g.breath;
-    rs.shimmer = 0.05f * g.shimmer * g.growth;
+    rs.modDepth = 0.3f + 0.8f * g.motion;
+    rs.modRate = 0.22f + 0.42f * g.breath;
+    rs.shimmer = (0.02f + 0.17f * g.shimmer) * (0.55f + 0.45f * g.growth);
     rs.diffusion = 0.68f;
     hall.setTargets(rs, snap);
     hallMix.aim(0.24f + 0.16f * g.growth, snap);

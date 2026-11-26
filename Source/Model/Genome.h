@@ -74,9 +74,18 @@ struct Transcript
     float coreCutoff = 8000.0f;
     float coreSlope = 12.0f;
     float coreFormant = 1200.0f;
+    float coreFormant2 = 2400.0f;
     float coreFormantAmt = 0.0f;
     float coreOddEven = 0.0f;
     float coreDrive = 0.0f;
+    float coreBrightness = 0.5f;       // 泛音明亮与激励倾斜 [0,1]
+    float coreInharmonicity = 0.0f;    // 芳香/刚性环驱动的晶体微伸展 [0,1]
+    float coreAir = 0.0f;              // 丝绒气声/擦弦微空气感 [0,1]
+    float coreMorph = 0.0f;            // 音符起音频谱演化方向 [-1,1]：正=晶脆收拢，负=柔雾绽放
+    float coreEnsemble = 0.0f;         // 核心残基 cents/多样性驱动的谐波微拍频与有机活力 [0,1]
+    float coreFifthLift = 0.0f;        // 极性羟基/酰胺驱动的五度/双八度晶格提亮 [0,1]
+    float coreSubWarmth = 0.0f;        // 疏水/碱性大分子驱动的低八度温暖胸腔共鸣 [0,1]
+    float corePresence = 0.0f;         // 极性/芳香/酸性驱动的高频晶莹光泽 [0,1]
 
     // key2 → body 效果链性状（链的拓扑由 stopKind 选择，见 Dsp/BodyFx.*）
     float fxGrowth = 0.0f;             // 生长度 [0,1]：body 长度 → 湿度 / 回授 / 尾音

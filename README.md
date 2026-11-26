@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.2-2A2A28" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0-2A2A28" alt="Version">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/framework-JUCE%208.0.12-orange" alt="JUCE">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License">
@@ -51,9 +51,9 @@
 | 模块 / Module | 功能描述 / Description |
 |------|---------|
 | **转录场景 Transcription scene** | 单场景：DNA 双螺旋、启动子 / 终止子、聚合酶沿链移动、RNA 边合成边生长，Bind → Unwind → Extend → Release 四阶段。拖动聚合酶或自动播放，转录进度直接驱动音色。<br>*A single scene: double helix, promoter/terminator, polymerase travelling along the strand, RNA growing behind it, four stages. Drag or auto-play; progress drives the timbre.* |
-| **密码子编辑 Codon editing** | 20 个常见密码子紧凑选择器 + 64 个全密码子；点击替换、横向拖动滑动、右键删除、`+ Add codon` 插入；64 步撤销 / 重做。<br>*20-codon compact picker plus all 64; click to replace, drag to scrub, right-click to delete, insert at will; 64-step undo/redo.* |
-| **减法核心 Subtractive core** | 布朗噪声经 8 路并联带通（f0 × k）成声；带通数 1–8 由核心密码子的平均 slope 决定，谐波衰减指数同源；再经频谱倾斜低通、共振峰、奇偶偏置与预热饱和。实测 39.5% 的随机三密码子组合落在 1 路。<br>*Brown noise through 8 parallel band-passes at f0 × k; 1–8 bands follow the core codons' mean slope; then tilt low-pass, formant peak, odd/even bias and soft drive.* |
-| **身体效果 Body FX** | 中间区密码子生成 6 个性状基因（增长 / 空间 / 运动 / 呼吸 / 色调 / 微光）+ 序列种子；全局立体声链位于声部求和与 AGC 之后，按终止密码子切换三套拓扑：UAG 孢子（Pluck）、UAA 星云（Pad）、UGA 声腔（Lead），切换 80 ms 交叉淡化。湿音从第 4 个密码子起随转录逐渐变浓，到终止密码子达到满量。<br>*Body codons become six trait genes plus a sequence seed; a global stereo chain after the voice sum, with three topologies chosen by the stop codon (UAG Spore, UAA Nebula, UGA Voice) and 80 ms cross-fades. Wet depth ramps from the fourth codon to the terminator.* |
+| **密码子编辑 Codon editing** | 20 个常见密码子紧凑选择器 + 61 个全部编码密码子 + 3 个独立终止密码子；点击替换、横向拖动滑动、右键删除、`+ Add codon` 插入；64 步撤销 / 重做。<br>*20-codon compact picker, all 61 coding codons, plus 3 dedicated stop codons; click to replace, drag to scrub, right-click to delete, insert at will; 64-step undo/redo.* |
+| **减法核心 Subtractive core** | 布朗噪声（经精确高频标准差补偿）穿过 8 路并联带通（f0 × k）成声；核心三密码子 `C[1..3]` 分工驱动谐波骨架/晶体微伸展/低八度暖腔、双共振峰 `F1/F2` 与低通截止、丝绒气声与音符内频谱演化，均匀展开 1–8 路谐波分布，再经丝绸高架光泽、奇偶偏置与柔和饱和。<br>*Brown noise (with exact high-harmonic compensation) through 8 parallel band-passes at f0 × k; core codons `C[1..3]` divide harmonic skeleton/inharmonicity/warm sub, dual `F1/F2` formants & low-pass, and breath/in-note spectral evolution, followed by silk high-shelf sheen, odd/even bias and soft drive.* |
+| **身体效果 Body FX** | 中间区密码子生成 6 个性状基因（增长 / 空间 / 运动 / 呼吸 / 色调 / 微光）+ 序列种子，同时向核心反哺延迟淡入微颤音与色泽/微光质感；全局立体声链位于声部求和与 AGC 之后，按终止密码子切换三套拓扑：UAG 孢子（Pluck）、UAA 星云（Pad）、UGA 声腔（Lead），切换 80 ms 交叉淡化。湿音从第 4 个密码子起随转录逐渐变浓，到终止密码子达到满量。<br>*Body codons become six trait genes plus a sequence seed (also feeding delayed subtle vibrato and tonal tint back into the core); a global stereo chain after the voice sum switches across three topologies by stop codon (UAG Spore, UAA Nebula, UGA Voice) with 80 ms cross-fades, ramping from the fourth codon to the terminator.* |
 | **实时频谱 Output spectrum** | 真实输出的 4096 点 FFT，96 个对数频段（40 Hz–16 kHz），Catmull-Rom 平滑、峰顶保持、局部峰标注；纯噪声时是 −6 dB/oct 斜线，核心介入后长出等间距谐波峰。<br>*A real 4096-point FFT of the output, 96 log bands, smoothed with peak hold and labelled partials; a −6 dB/oct slope for noise, evenly spaced peaks once the core engages.* |
 | **预设与状态 Presets** | 5 个工厂序列：Central Dogma、Insulin、Hemoglobin、Fluorescence、Start + Stop。默认加载 **Insulin / INS**（DNA、核心区与 body 区完整，第一次播放即可听到从噪声到完整音色的全过程）；序列与转录进度随宿主工程保存。<br>*Five factory genes; the default is **Insulin / INS** (a complete DNA / core / body layout, so the first play already runs the full noise-to-tone arc); sequence and progress persist with the host project.* |
 | **转录进度与自动化 Progress & automation** | 宿主可见参数只有一个 **`Transcription progress`**（0–100 %，内部 `scan`）：0 % 纯布朗噪声、100 % 完整音色。可被 DAW 自动化、随工程保存，重开工程恢复聚合酶位置；界面动画与参数双向同步（播放 / 拖动时按 60 ms 节流写回）。<br>*A single host parameter — **`Transcription progress`** (0–100 %, internal `scan`): 0 % is pure brown noise, 100 % the full timbre. Host-automatable and saved with the project; the UI animation and the parameter stay in two-way sync.* |
@@ -100,7 +100,7 @@ cmake --build cmake-build-release --config Release
 
 ### 离线测试 / Offline tests
 
-- `TranscriptionDSPTests`：密码子映射、8 路带通边界、起音瞬态、噪声颜色、body 湿音随转录推进、三套效果链与终止密码子切换。
+- `TranscriptionDSPTests`：密码子映射、8 路带通边界、起音瞬态、噪声颜色、多基因音色频谱跨度与单密码子编辑敏感度（`testTimbreDiversity`）、body 湿音随转录推进、三套效果链与终止密码子切换。
 - `TranscriptionStateTests`：状态往返、不开 UI 的音频恢复、样本级 MIDI、编辑器渲染快照与多组预览。
 
 ---
@@ -134,6 +134,7 @@ cmake --build cmake-build-release --config Release
 
 | 版本 | 变更 |
 |------|------|
+| **1.4.0** | **基因音色表达广度深度升级（系列统一 v1.4.0）。** 打破核心三密码子均值坍缩，建立 C[1]/C[2]/C[3] 位置分工（谐波骨架 / 双共振峰共鸣腔 / 气声与起音演化）；修正布朗噪声高次泛音补偿并放宽谐波数映射分布；新增芳香环晶体微伸展、低八度暖腔、丝绸高架光泽、延迟淡入有机呼吸颤音与 body 序列音色反哺；经三轮实听精调兼顾空灵悦耳与丰富乐器跨度。 |
 | **1.1.2** | 新增 `Transcription progress`（`scan`）参数：可自动化、随工程保存，界面与参数双向同步；删除 7 个 legacy no-op 参数，宿主只暴露一个参数；修复拖到 100 % 不保存、恢复顺序等问题。 |
 | **1.1.1** | 默认预设改为 Insulin / INS；新增首次引导 + 自动按住 C5 试听。 |
 | **1.1.0** | 布朗噪声、8 路带通减法核心、三套全局 body 效果链、湿音随转录推进、实时输出频谱；README 重写、截图重制。 |

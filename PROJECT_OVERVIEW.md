@@ -1,6 +1,6 @@
 # Transcription · 项目概览与开发交接
 
-更新日期：2026-10-20。当前工程版本：1.1.2。
+更新日期：2026-11-26。当前工程版本：1.4.0。
 本文记录当前源码、用户已确认的方向和验证边界，供新对话直接接手；不是原始灵感文档的复述，也不是未来功能承诺。
 
 ## 1. 项目定位与范围
@@ -38,7 +38,7 @@
 - 直接拖动聚合酶可定位转录进度；拖动通常暂停过程，拖至终点松手会继续完成释放阶段。底部 `Bind / Unwind / Extend / Release` 阶段灯随拖动进度逐渐点亮（播放时按阶段时间点亮）。
 - **转录进度随工程保存并可自动化**（v1.1.2）：宿主可见参数只有 `Transcription progress`（0–100 %，`scan`），保存位置、重开工程恢复聚合酶位置；界面动画在播放/拖动时把进度写回参数（60 ms 节流），参数被自动化或工程恢复改写时画布 `seek` 跟随。
 - 密码子条使用 RNA 写法（含 U），显示三联体及氨基酸缩写；点击卡片替换整组（点击判定在抬起时，与滑动区分），`+ Add codon` 添加，滚轮或按住拖动浏览长序列，右键点击中间密码子直接删除。
-- `CodonPicker` 默认显示 21 个代表性选择（20 种氨基酸各一个密码子，加一个 Stop）；`View all 64 codons` 按需展开完整密码表。
+- `CodonPicker` 编码模式默认显示 20 个常见氨基酸代表密码子，点击 `View all 61 codons` 按需展开全部 61 个编码密码子；终止位点击则打开独立的 3 终止密码子选择器（UAA Pad / UAG Pluck / UGA Lead）。
 - 选中即应用并关闭弹层；`Remove codon` 明确移除整组。支持方向键、Enter、Escape 和点击弹层外取消。
 - 更多菜单包含撤销、重做、重置过程、清空中间密码子、`Show intro again`；v1.1.2 起删除了菜单里的分节标题（JUCE 默认 `headerTextColourId` 在白色菜单上不可见，只留下空行），预设菜单也不再显示 `Choose a gene fragment` 标题。撤销/重做也支持 Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y。
 - 序列操作撤销历史最多 64 次，不随宿主工程保存；切换工厂预设会清空历史。
@@ -63,8 +63,8 @@
 - 白底、轻临床风格、低饱和颜色、细线、克制的透明度和留白；沿用前两款的系列语言。
 - 默认 820×560，固定比例；可缩放范围 615×420 至 1640×1120。编辑器使用逻辑坐标缩放，画布参考尺寸为 772×382。
 - 顶栏保持左侧 `iisaacbeats.cn` 与版本、中央预设、右侧更多入口。
-- 主题颜色：正文 `#292D2E`、次要文字 `#858983`、细线 `#E5E7E0`、纸色 `#F7F8F4`、蓝色 `#2A6FB0`、绿色 `#687B54`。
-- 碱基颜色：A `#4B504C`、T/U `#B75C55`、C `#497BAF`、G `#B59A49`；不能只靠颜色传达身份，仍保留字母。
+- 主题颜色：正文 `#292D2E`、次要文字 `#6E6E68`、细线 `#DCDCD5`、纸色 `#F7F8F4`、蓝色 `#2A6FB0`、绿色 `#4E8A3C`（v1.0.3 起提高对比度与饱和度，见 `ScientificLookAndFeel.h`）。
+- 碱基颜色：A `#3C403C`、T/U `#B0493C`、C `#3A78C2`、G `#C18D26`；不能只靠颜色传达身份，仍保留字母。
 - 使用 JUCE 系统字体，没有内嵌字体依赖。英文应尽量简洁，并检查缩小窗口后的长度，不靠增加面板解决文案拥挤。
 - `ui::text(const char*)` 内部使用 `juce::String::fromUTF8`。含箭头、乘号、圆点等非 ASCII 符号时，不要直接依赖 JUCE 的窄字符串 ASCII 构造。
 
@@ -79,7 +79,7 @@
 | `Source/UI/ScientificLookAndFeel.h` | 颜色、字体、按钮与绘制样式、UTF-8 文本入口；仍保留当前主屏未使用的旋钮绘制。 |
 | `Source/Model/Genome.h`、`Source/Model/Genome.cpp` | 固定容量 `Genome`、64 密码子翻译、20 氨基酸属性、`transcribe()`、旧突变/门控能力及 `GenomeMailbox`。 |
 | `Source/Dsp/TranscriptionEngine.h`、`Source/Dsp/TranscriptionEngine.cpp` | `transcription::Engine`：噪声、声部、包络、MIDI、平滑、自动响度、body 激活调度与输出保护。 |
-| `Source/Dsp/SubtractiveCore.h`、`Source/Dsp/SubtractiveCore.cpp` | 每声部减法核心（key1）：谐振组 → 倾斜 → 共振峰 → 偏置。 |
+| `Source/Dsp/SubtractiveCore.h`、`Source/Dsp/SubtractiveCore.cpp` | 每声部减法核心（key1）：8 路谐振组（含精确布朗补偿、晶体微伸展、低八度暖腔）→ 倾斜低通 → 双共振峰 `F1/F2` → 丝绸高架光泽 → 丝绒气声层与奇偶偏置/软饱和。 |
 | `Source/Dsp/BodyFx.h`、`Source/Dsp/BodyFx.cpp` | body 效果总线（key2）：`BodyFx` 链切换/交叉淡化/旁路/休眠，三条链 `SporeChain` / `NebulaChain` / `VoiceChain` 与共用 `Halo`。 |
 | `Source/Dsp/FxBlocks.h`、`Source/Dsp/FxBlocks.cpp` | 效果器基础模块：`DelayLine`（Hermite 分数延迟）、`Svf`、`Allpass`、`OrganicLfo`、`OctaveShifter`、8 线 `FdnReverb`。 |
 | `Source/PluginProcessor.h`、`Source/PluginProcessor.cpp` | `TranscriptionAudioProcessor`：宿主接口、`scan` 参数、DNA 发布、采样位置 MIDI 路由、实时频谱分析、状态恢复和工厂预设。 |
@@ -100,10 +100,10 @@
 
 - **三段式 DSP 链路**（v1.0.11 起噪声源为布朗噪声；v1.0.15 起 body 效果改为全局立体声总线）：每声部「泄漏积分噪声 → 减法核心（4 级）→ 终止包络 ADSR」→ 声部求和 → 自动响度（只对齐干声）→ **body 效果总线（按终止密码子三选一，4 级）** → DC/软限幅 → 输出。8 声部，效果总线全局一份。
 - **序列分段**：`C[0]=ATG` 启动子门控；`C[1..3]=核心 core`（`coreCount=clamp(N-2,0,3)`）驱动 key1 → 减法核心；`C[4..N-2]=中间 body`（`bodyCount=max(0,N-5)`）驱动 key2 → body 链**参数**；`C[N-1]=终止密码子` → 终止 ADSR **并选择 body 链拓扑**（UAG Amber=pluck/Spore、UAA Ochre=pad/Nebula、UGA Opal=lead/Voice，固定）。
-- **减法核心 4 级**（入口 `Dsp/SubtractiveCore.*`）：谐波谐振组（**8 路带通**，能量守恒补偿；v1.0.10 起由 32 路改为 8 路，`coreHarmonics` 范围 1–8）→ 频谱倾斜（低通）→ 共振峰（峰值 EQ）→ 谐波偏置（奇偶 + 预热饱和）。参数全部由 key1 映射（`coreResonance/coreHarmonics/coreCutoff/coreSlope/coreFormant/coreFormantAmt/coreOddEven/coreDrive`），无旋钮。
-  - 带通数映射（v1.0.12–1.0.14 定型）：`coreHarmonics = clamp(round(8·((2−meanSlope)/1.5)^4.5), 1, 8)`。指数 4.5 让音色明显偏向少谐波：三个核心密码子的随机组合中 1 路 39.5%、2 路 28.1%、3 路 19.3%、4 路 8.5%、5 路 3.6%、6 路 0.9%、7 路 0.1%、8 路 ≈0%（需刻意选三个 Tyr/Asp）。slope ≥1.00 统一落到 1 路（如三个 Gly），这也是“只剩一条正弦”的测试用例。
+- **减法核心 4 级（v1.4.0 扩展）**（入口 `Dsp/SubtractiveCore.*`）：谐波谐振组（**8 路并联带通** + 芳香环晶体微伸展 + 低八度暖腔，精确布朗带通标准差补偿；`coreHarmonics` 范围 1–8）→ 频谱倾斜低通 + 丝绸高架光泽（2.7–3.9 kHz）→ 双共振峰 `F1/F2` → 丝绒气声层 + 奇偶偏置 + 柔和饱和。参数全部由 key1 映射，无旋钮。
+  - 位置分工与带通数映射（v1.4.0 升级）：核心三密码子 `C[1..3]` 实施 68% 位置主责 + 32% 均值混合（`C[1]` 主导谐波骨架/奇偶/晶体刚度/低八度暖腔，`C[2]` 主导双共振峰 `F1/F2` 与滤波截止，`C[3]` 主导丝绒气声与音符内频谱演化），打破真实蛋白均值坍缩；带通数指数由 4.5 放宽至 **1.45**（均匀展开 1–8 路，仍保留纯 Gly = 1 路、Tyr/Asp = 8 路、全 Ala ≤ 4 路锚点）。
   - 新音符起点必须把 biquad 系数直接吸附到带通目标（`setParameters(..., snap=true)`，仅由 `Engine::refresh` 的 noteOn 分支触发），否则会从 `reset()` 的恒等直通平滑收敛，产生起音突发（v1.0.5）。
-  - 噪声源为布朗噪声（v1.0.11）：一阶泄漏积分 `brown = brown*0.995 + white*0.05`（约 38 Hz 转折），输出 ×1.5 后限幅；谐振组 2 阶带通的 6 dB/oct 裙边与布朗噪声的低频抬升相互抵消，基频 `argmax` 会偏约 1%。
+  - 噪声源为布朗噪声（v1.0.11）：一阶泄漏积分 `brown = brown*0.995 + white*0.05`（约 38 Hz 转折），输出 ×1.5 后限幅；v1.4.0 改用精确布朗带通标准差补偿（去除压死高次泛音的常数偏置），让中高次泛音清晰自然浮现；基频 `argmax` 仍受裙边轻微影响约 1%。
 - **body 效果链（v1.0.15 重构，入口 `Dsp/BodyFx.*` + `Dsp/FxBlocks.*`）**：目标音色为「有机生命感、空灵、高级」。三条链拓扑完全不同，每条 4 级，均由 scanPhase 逐级激活：
 
 | 终止密码子 | 链 | 级 1 | 级 2 | 级 3 | 级 4 |
@@ -112,13 +112,13 @@
 | UAA Ochre / pad | **Nebula 星云** | 细胞膜呼吸（有机 LFO 开合低通 + 轻微振幅起伏） | 纤毛合唱（三条独立漂移的调制延迟） | 八度微光大厅（长尾 FDN + 八度上移 shimmer 回授） | 光晕 Halo |
 | UGA Opal / lead | **Voice 声腔** | 元音共振光泽（F1/F2 沿 u-o-a-e-i 缓慢滑移） | 微移双声（左右极短漂移延迟，微失谐） | 呼吸避让回声（演奏时退后，停顿时浮现） | 大厅（较长预延迟） |
 
-  - key2 性状（`transcribe()`，`Transcript::fx*`）：`fxGrowth = 1−e^(−L/6)`（湿度/回授/尾音）；`fxSpace` = GC 含量 25–75% → 0..1（空间尺寸与衰减）；`fxMotion` = (极性 + 0.5·甘氨酸)/L/0.6（调制深度）；`fxBreath` = 疏水/L/0.7（呼吸/漂移速率）；`fxTone` = 3·(酸性−碱性)/L ∈ [−1,1]（明亮/温暖）；`fxShimmer` = 环状残基 F/W/Y/H/P 占比/0.35（八度光晕）；`fxSeed` = body 碱基 FNV-1a 哈希（每条基因独特的漂移性格，仅影响 LFO 速率与时值微偏移，不重置 LFO 状态）。`bodyCount=0` 时性状保持默认且整条链旁路。
+  - key2 性状（`transcribe()`，`Transcript::fx*`）：`fxGrowth = 1−e^(−L/6)`（湿度/回授/尾音）；`fxSpace` = GC 含量 25–75% → 0..1（空间尺寸与衰减）；`fxMotion` = (极性 + 0.5·甘氨酸)/L/0.6（调制深度）；`fxBreath` = 疏水/L/0.7（呼吸/漂移速率）；`fxTone` = 酸碱差叠加极性/疏水偏置 ∈ [−1,1]（明亮/温暖）；`fxShimmer` = 环状残基 F/W/Y/H/P 占比/0.35（八度光晕）；`fxSeed` = body 碱基 FNV-1a 哈希（每条基因独特的漂移性格，仅影响 LFO 速率与时值微偏移，不重置 LFO 状态）。v1.4.0 起 body 性状在 `bodyWetPhase` 驱动下同步向核心反哺延迟淡入微颤音与共振峰/丝绸光泽色泽偏移；`bodyCount=0` 时性状保持默认、整条链旁路且反哺归零。
   - `OrganicLfo` = Catmull-Rom 平滑随机游走 + 黄金比例慢正弦，避免机械周期感；`FdnReverb` = 输入低切 + 4 级扩散 + 8 条调制延迟线 + Hadamard 混合，环内只有阻尼低通与 25 Hz 次声保护（环内高通会每圈削弱基频，尾音过早消失）；shimmer 注入经 tanh 限幅，线性环增益恒 < 1。
   - 链切换：改终止密码子时新旧链 80 ms 线性交叉淡化，新链先清空缓存；各级激活 40 ms 平滑；全部激活为 0 时直通干声并清空缓存；无输入且尾音低于 −120 dB 0.3 s 后休眠。所有缓冲只在 `prepare()` 分配，音频线程不分配（旧版 noteOn 内 `fx.prepare()` 的分配隐患随旧链一并删除）。CC120 同时清空效果尾音。
   - 响度：每条链湿干均为等功率混合，FDN 输出按平均环增益归一化；DSP 测试要求三条链持续段相对干声 ±3 dB（调校时实测 pluck ≤ +2.6 dB，最接近上限；pad ≈ −1 dB；lead ≈ −0.4 dB）。
 - **全局转录语义**：音色只随全局 `scanPhase ∈ [0,1]` 演化（`GeneCanvas::scanPhase()` → `scan` 参数 → `processor.scanPhase` → `engine.setScanPhase()`）。`ready/binding/opening=0`（纯噪声），`elongating=progress`，`releasing/complete=1`（完整音色）。激活调度：核心 4 级窗口 ∈ `[0, coreCount/M]`，逐级 smoothstep；body 效果链从 v1.0.16 起改为按**密码子位置**推进：第 4 个密码子（`C[3]`）为 0，终止密码子（`C[N-1]`）为 1，四级激活与整体湿音 `wet` 共用这条位置轴，因此到终止密码子时同时到满。`coreCount=0` 时整条乐音链旁路（纯布朗噪声，仍带终止 ADSR）。
 - **`scan` 参数（v1.1.2）**：默认 100 %，未打开界面时直接播放完整音色；新实例第一次打开界面时界面显示待机但参数仍为 100 %，直到用户真正开始转录才写入 0 %。宿主自动化 / 工程恢复写入的值优先，编辑器只在播放/拖动时按 60 ms 节流回写；旧工程没有 `scan` 字段时恢复为 0。
-- **自动响度**：静态归一化（`transcript.normalisation`）+ 慢速 AGC（能量追踪，attack 200ms / release 500ms，增益 ±26dB）+ 末端软限幅与 DC 处理。
+- **自动响度**：静态归一化（`transcript.normalisation`）+ 温和慢速 AGC（能量追踪，attack 120 ms / release 220 ms / smooth 40 ms，`targetRms = 0.095`，增益 0.05–20 倍）+ 末端软限幅与 DC 处理。
 - MIDI 负责音高与音符时长；支持力度、±2 半音弯音、CC64 踏板、CC7 音量、CC11 表情、CC120/123。
 - **旧的 7 个参数已在 v1.1.2 删除**：`precision`/`mutation`/`attackScale`/`releaseScale`/`width`/`output`/`noise` 自 v1.0.4 起就不驱动 DSP，v1.1.2 把它们从参数布局、`ParameterRefs`、`Controls` 结构与预设表中一并移除；宿主现在只会看到 `Transcription progress` 一个参数。旧工程状态里多出来的参数节点会被 `replaceState` 忽略，不影响 DNA/宽度/程序的恢复。
 
@@ -158,7 +158,7 @@
 - 后续代码修改后继续自行构建并验证；如果 `ChemE-Transcription.exe` 或宿主锁住产物，提示用户关闭，不擅自结束用户进程，不绕过拒绝。
 - macOS 的 AU/VST3/Standalone、macOS 11 最低版本及 x86_64/arm64 配置已写入 CMake，**尚未实际构建验证**。
 
-### 本轮（1.0.5 → 1.1.2）变更总览
+### 版本演进总览（1.0.5 → 1.4.0）
 
 | 版本 | 主题 | 关键改动 |
 |---|---|---|
@@ -174,10 +174,13 @@
 | 1.0.17 / 1.1.0 | 发布 | 三款插件首次进入系列安装包 1.3.0；README 重写、截图重制 |
 | 1.1.1 | 首次体验 | 默认预设改 Insulin / INS；首次打开引导 + 自动按住 C5 |
 | 1.1.2 | 进度与整理 | 新增 `scan` 参数（保存/自动化）、界面双向同步；删除 7 个旧参数；菜单去空行；修复恢复顺序与 100 % 不保存 |
+| 1.4.0 | 音色广度升级 | 位置分工打破均值坍缩、布朗高频补偿、双共振峰/晶体微伸展/低八度暖腔/丝绸高架光泽/音符内频谱演化与 body 音色反哺；三轮实听精调 + 多样性测试；全系列统一 v1.4.0 |
 
-每一版都运行 `build.ps1`（`BUILD_OK` + 两项 CTest）；频谱/信号带相关版本同时更新了 `Preview/` 下的截图。安装包版本独立于组件版本，本轮为 **1.3.0**。
+每一版都运行 `build.ps1`（`BUILD_OK` + 两项 CTest）；频谱/信号带相关版本同时更新了 `Preview/` 下的截图。1.4.0 起三款插件与系列安装包统一版本号 **1.4.0**。
 
 ### 已实际验证的最近基线
+
+- **1.4.0**（2026-11-26）：多维基因音色广度升级与三轮实听精调。① 解除 `coreHarmonics` 4.5 次幂过度压死（改为 1.45 次幂均匀展开 1–8 路，仍保留纯 Gly=1、Tyr/Asp=8、全 Ala≤4）；② 核心 `C[1..3]` 实施 68%/32% 位置分工（C[1] 主导谐波骨架/奇偶/晶体刚度/低八度暖腔，C[2] 主导双共振峰 F1/F2 共鸣腔与低通，C[3] 主导气声质感与起音频谱演化），彻底解决真实蛋白均值坍缩；③ `SubtractiveCore` 修正布朗噪声精确带通标准差补偿（去除压死高频的常数偏置），新增物理弦刚度微伸展、低八度暖胸腔、双共振峰 F1/F2、丝绸高架光泽（2.7–3.9 kHz）与丝绒气声层，并将单声部目标能量与共振峰补偿校准至充裕动态余量消除起音撞限幅；④ `Engine` 与 `BodyFx` 接入音符内动态频谱呼吸演化、body 驱动的延迟淡入微颤音与酸碱/极性/芳香色泽反哺（严格受 `bodyWetPhase` 控制，保持 `testBodyWetRamp` 与无 body 单声道契约）；⑤ `DspTests.cpp` 新增 `testTimbreDiversity` 多家族频谱跨度与单密码子编辑敏感度回归；`CMakeLists.txt` 显式传入 `VERSION ${PROJECT_VERSION}` 并补充 Windows `.rc` 依赖。版本 1.4.0，Windows 构建 `BUILD_OK`，两项 CTest 通过。
 
 - **1.1.2**（2026-10-20）：转录进度持久化 + 宿主自动化。① `Parameters.cpp` 新增 `scan` 参数（`ParameterID{"scan", 1}`，范围 0–1、步进 0.001、显示为 0–100 %，默认 1.0），加入 APVTS 后由 `copyState()` 自动随工程保存；未加入 `parameterIds`（7 个旧 ID 的校验数组），因此旧工程仍可正常恢复，缺 `scan` 时显式复位到 0。② `processBlock` 每块读取 `scan` → `scanPhase` 原子 + `engine.setScanPhase()`，宿主自动化直接控制音色；默认 100 % 保证未打开界面时仍是完整音色。③ 编辑器与参数双向同步：动画运行/拖动时按 60 ms 节流写回参数、停下/完成时补写最后一帧；检测到参数被宿主改写（差值 > 0.002）时 `canvas.seek()` 跟随。新实例第一次打开界面时界面从待机显示但不改参数，点击转录的瞬间写入 0 %。④ 状态测试新增：`scan=0.42` 的工程状态往返恢复，以及 `processBlock` 后 `scanPhase` 等于 0.42。⑤ 引导期间自动按住的 C5：用户一旦打断（再次点击转运按钮、点击画布/密码子等导致 `canvas.isRunning()` 变 false 且未完成）立刻 noteOff；正常完成则再保持 1.5 s。⑥ 移除预设菜单与 `···` 菜单里的 `addSectionHeader`：JUCE 默认分节标题使用 `PopupMenu::headerTextColourId`，在白色菜单上几乎不可见，只留下空行/空块。⑦ 删除 7 个 no-op 旧参数（布局、`ParameterRefs`、`Controls`、预设表、状态校验一并清理），宿主只剩 `Transcription progress`；旧状态缺 `scan` 时先记录 `hadScan` 再 `replaceState`（`replaceState` 会把缺失参数补进 tree），随后显式复位到 0。测试新增：参数数量必须为 1、旧状态（移除 scan 节点）仍能恢复 DNA 且进度归零。⑧ 修复“音色在正确阶段但聚合酶停在最左”：界面同步不再依赖“参数是否相对上次写入发生变化”，而是未播放/未拖动时直接比较 `canvas.scanPhase()` 与 `scan` 参数，不一致就 `seek`；仅新实例的默认 100 %（`freshPending`）例外，保持界面停在待机，直到用户开始转录。状态测试新增两种宿主顺序：先恢复状态再开界面、开界面后才恢复状态（含中间若干帧），都要求聚合酶位置与 0.42 一致。⑨ 修复“拖到 100 % 不保存”：新实例参数默认也是 100 %，此前会把保存的 100 % 误判成“尚未开始”。现在用 `processor.stateRestored`（宿主恢复过）与 `processor.transportUsed`（用户播放/拖动过）共同判断 `pendingFresh`：真正的新实例停在待机，工程恢复或用户拖到过末端则 seek 到 100 %。测试新增三条：100 % 位置在“先恢复”与“后恢复”两种顺序下都能还原、全新实例仍停在待机。版本 1.1.2，Windows 构建 `BUILD_OK`，两项 CTest 通过。
 - **1.1.1**（2026-10-20）：默认预设由 `Start + Stop` 改为 `Insulin / INS`（`defaultPresetIndex = 1`，构造函数的 genome、控制值与 `lastPreset` 同步）。新增首次打开引导：编辑器用 `juce::PropertiesFile`（`%APPDATA%/iisaacbeats/Transcription.settings`，键 `onboardingDone`）判断是否为首次；当未引导过且当前预设是 Insulin 时显示 `FirstRunHint` 覆盖层——按钮呼吸描边 + 按钮左侧说明卡，文案为 `Press Start transcription / C5 is held for you - listen to the timbre change.`。覆盖层 `setInterceptsMouseClicks(false, false)`，点击穿透到右下角转运按钮；用户第一次点击开始转录时写入 `onboardingDone=true`，并通过 `keyboardState.noteOn(1, 72, 0.85)` 自动按住 C5（MIDI 72），转录完成后再留 1.5 s 释放，最长 22 s；编辑器析构时若仍按住则释放。新增 `processor.suppressOnboarding` 供离线截图使用，状态测试新增 `--onboarding-snapshot`（`Preview/onboarding.png`），其余快照模式默认抑制引导。状态测试的默认断言改为 Insulin。版本 1.1.1，Windows 构建 `BUILD_OK`，两项 CTest 通过。
@@ -204,9 +207,9 @@
 - **1.0.4 修复**（2026-10-09）：自动响度 AGC 曾在无音符（静音）期间把增益顶到上限（`energy=0` → `gain=20`），导致音色变化后的第一次 MIDI 触发爆出大音量。现改为静音时 `autoGain` 回落到中性 1、`rmsFollower` 衰减，仅在有活动 voice 时更新 AGC（入口 `Engine::render()`）。
 - **1.0.4**（2026-10-09）：转录三段式 DSP 落地（依开发需求文档）。`transcribe()` 重构为分段模型：`core[3]`/`body`/`stop`，key1 → 减法核心 4 级参数、key2 → 效果器组 4 级参数、终止密码子 → 固定 ADSR（UAG/UAA/UGA → pluck/pad/lead）；删除旧「第 i 密码子 = 第 i 谐波」映射与 GC 派生包络。新增 `Dsp/SubtractiveCore.*`（谐振组 + 倾斜 + 共振峰 + 偏置）与 `Dsp/FxChain.*`（饱和 + 失谐 + 延迟 + 混响）；`Engine`/`Voice` 重写为全局 `scanPhase` 调度（核心/FX 逐级 smoothstep 激活，`core=0` 纯白噪声、`body=0` FX 旁路），删粉/棕噪声，加自动响度（静态归一化 + 慢速 AGC + 软限幅）。`PluginProcessor` 用 `std::atomic<float> scanPhase` 传递，旧 7 参数全部降级 no-op（ID/状态兼容保留）。`GeneCanvas` 输出 `scanPhase` 并新增合成频谱示意（HARMONICS 条）。DSP 测试重写：映射、扫描激活、响度 ±3dB、MIDI/稳定性/分块一致性。版本号同步到 1.0.4。Windows 构建 `BUILD_OK`，两项 CTest 通过。
 - 全英文 UI 版本 Windows 构建成功，`BUILD_OK` / exit 0；`TranscriptionDSPTests` 与 `TranscriptionStateTests` 两个 CTest 目标全部通过。
-- 三款插件的系列安装包为 `i:/ChemEPlugins/dist/ChemEPlugins_Setup_1.3.0_x64.exe`（OC 1.2.1 / Entropy 1.1.0 / Transcription 1.1.2），系列安装器使用独立 AppId，不会卸载旧版插件。
-- DSP 测试覆盖密码表、真实片段翻译、快照一致性、音高、力度、门控、踏板、弯音、声部抢占、分块一致性及极端输入稳定性。
-- 状态/交互测试覆盖整密码子选择与删除、64 密码子库、完整转录阶段、暂停/拖动、不由动画触发 MIDI、英文状态按钮、窗口恢复、无 UI 发声、零样本块 Note Off 及损坏状态拒绝。
+- 三款插件的系列安装包为 `i:/ChemEPlugins/dist/ChemEPlugins_Setup_1.4.0_x64.exe`（三款统一 `1.4.0`），系列安装器使用独立 AppId，不会卸载旧版插件。
+- DSP 测试覆盖密码表、真实片段翻译、快照一致性、音高、力度、门控、踏板、弯音、声部抢占、分块一致性、多基因音色频谱跨度与单密码子编辑敏感度（`testTimbreDiversity`）及极端输入稳定性。
+- 状态/交互测试覆盖整密码子选择与删除、61 编码 + 3 终止密码子库、完整转录阶段、暂停/拖动、不由动画触发 MIDI、英文状态按钮、窗口恢复、无 UI 发声、零样本块 Note Off 及损坏状态拒绝。
 - 最新 IDE 检查无新增错误/警告；待机、延伸、完成、选择库、全部密码子和缩小窗口的原生截图已检查。
 - **未完成或未验证**：实际 DAW 试载、跨宿主兼容、macOS 构建、完整 CPU 性能评估、最终音色/听感验收、发布签名。不能将离线测试通过等同于这些验收通过。
 
@@ -219,7 +222,8 @@
 | `--snapshot` | `Preview/sequence.png`，当前单场景待机画面，文件名不是旧页签。 |
 | `--process-snapshot` | `Preview/transcription.png`，延伸进度示意。 |
 | `--codons-snapshot` | `Preview/codons.png`，紧凑密码子选择库。 |
-| `--all-codons-snapshot` | `Preview/all-codons.png`，完整 64 密码子库。 |
+| `--all-codons-snapshot` | `Preview/all-codons.png`，完整 61 编码密码子库。 |
+| `--long-snapshot` | `Preview/long-dna.png`，长基因序列滚动与两侧淡出状态。 |
 | `--complete-snapshot` | `Preview/complete.png`，释放完成。 |
 | `--compact-snapshot` | `Preview/compact.png`，615×420 缩小窗口。 |
 | `--carving-snapshot` | `Preview/carving.png`，噪声与谐波同屏的塑形中间态（6 密码子，core=3 / body=1，seek 0.10）。 |
@@ -228,8 +232,9 @@
 | `--onboarding-snapshot` | `Preview/onboarding.png`，首次打开引导层（默认 Insulin 预设）。 |
 | `--translation-snapshot` | 兼容选项，与过程截图相同；`Preview/translation.png` 已更新，不代表旧 Translation 页。 |
 | `--audio-preview` | `Preview/Transcription-preview.wav`，48 kHz / 24-bit / 立体声，五个预设各 5 秒。 |
+| `--timbre-showcase` | 导出多家族不同基因序列的立体声对照试听 WAV，用于听感迭代验证。 |
 
-截图是原生组件渲染结果，不是设计稿。试听 WAV 来自已有声音引擎，本轮交互与英文文案修改没有产生新的音色设计成果。
+截图是原生组件渲染结果，不是设计稿。试听 WAV 来自当前 v1.4.0 声音引擎的真实离线渲染输出。
 
 ## 11. 新对话的接手顺序
 

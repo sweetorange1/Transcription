@@ -470,12 +470,53 @@ void testBlockIndependence()
     for (size_t i = 0; i < reference.size(); ++i) difference = std::max(difference, std::abs(reference[i] - fragmented[i]));
     check(difference < 0.0000001f, "unchanged parameters keep audio independent of host block segmentation");
 }
+void testTimbreDiversity()
+{
+    // 验证不同化学家族基因在保持柔和响度与有限峰值的前提下，展现出宽广可辨的音色频谱跨度。
+    const int rate = 48000;
+    const std::array<const char*, 5> archetypes {{
+        "ATG GGC GGC GGC GGC GGT GGC GCC GGT TGA",   // 纯 Gly 极简纯音笛
+        "ATG TGC CTG AAG CTG TGC AAG CGT CTG AAG TGA", // 暖偶次 Cys-Leu-Lys 大提琴腔
+        "ATG CCG CCC GTG CCG CCC GTT GCT CCG GTT TGA", // 空心奇次 Pro 单簧管
+        "ATG TGG TAC TTC TTC TGG TAC CAC CCG TTC TGA", // 芳香晶体 Trp-Tyr-Phe 钢片琴
+        "ATG GAT GAA AGC GAA GAT TCT ACC GAA GAC TGA"  // 酸性明亮 Asp-Glu-Ser 水晶合唱
+    }};
+    const auto centroidOf = [&](const std::vector<float>& audio)
+    {
+        double num = 0.0, den = 0.0;
+        for (int k = 1; k <= 10; ++k)
+        {
+            const double f = 261.6256 * static_cast<double>(k);
+            const double p = spectralPower(audio, rate, f);
+            num += f * p;
+            den += p;
+        }
+        return den > 1.0e-18 ? num / den : 0.0;
+    };
+    std::array<double, 5> centroids {};
+    for (size_t i = 0; i < archetypes.size(); ++i)
+    {
+        const auto audio = render(dna(archetypes[i]), 1.0f, 60, 0.85f, rate, 1.2);
+        bool finite = true;
+        for (float s : audio) finite = finite && std::isfinite(s) && std::abs(s) <= 1.0f;
+        check(finite, "diverse gene archetype remains finite and bounded");
+        centroids[i] = centroidOf(audio);
+    }
+    const double minCent = *std::min_element(centroids.begin(), centroids.end());
+    const double maxCent = *std::max_element(centroids.begin(), centroids.end());
+    check(maxCent - minCent > 450.0, "distinct amino-acid families span a broad harmonic centroid range");
+    // 核心区单密码子编辑（改 C[1]）必须产生清晰可辨的频谱差异。
+    const auto base = render(dna("ATG GGC GCT GTT CTT TGG GAA AGC TGA"), 1.0f, 60, 0.85f, rate, 1.0);
+    const auto edited = render(dna("ATG GAT GCT GTT CTT TGG GAA AGC TGA"), 1.0f, 60, 0.85f, rate, 1.0);
+    check(std::abs(centroidOf(edited) - centroidOf(base)) > 200.0,
+          "editing a single core codon audibly shifts the timbre spectrum");
+}
 }
 int main()
 {
     testGenetics(); testMailbox(); testTranscriptMapping(); testScanPhaseAndActivation();
     testPitchAndDynamics(); testAutoLoudness(); testBodyChains(); testBodyWetRamp(); testCoreOnsetSnaps();
-    testMidiAndStability(); testBlockIndependence();
+    testMidiAndStability(); testBlockIndependence(); testTimbreDiversity();
     if (failures != 0) { std::cerr << failures << " test(s) failed\n"; return 1; }
     std::cout << "PASS: genetics, mapping, scan-phase activation, pitch, velocity, loudness, body chains, MIDI and DSP stability\n";
     return 0;

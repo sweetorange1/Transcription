@@ -3,7 +3,7 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "macOS architectures")
 endif()
-project(Transcription VERSION 1.1.2 LANGUAGES C CXX)
+project(Transcription VERSION 1.4.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -35,6 +35,7 @@ if(TRANSCRIPTION_BUILD_PLUGIN)
         list(APPEND transcription_formats AU)
     endif()
     juce_add_plugin(Transcription
+        VERSION ${PROJECT_VERSION}
         PRODUCT_NAME "ChemE-Transcription"
         COMPANY_NAME "iisaacbeats.cn"
         BUNDLE_ID "cn.iisaacbeats.ChemETranscription"
@@ -52,6 +53,12 @@ if(TRANSCRIPTION_BUILD_PLUGIN)
         AU_MAIN_TYPE kAudioUnitType_MusicDevice
         COPY_PLUGIN_AFTER_BUILD ${TRANSCRIPTION_COPY_PLUGIN_AFTER_BUILD})
     juce_generate_juce_header(Transcription)
+    if(WIN32)
+        get_target_property(transcription_generated Transcription JUCE_GENERATED_SOURCES_DIRECTORY)
+        get_target_property(transcription_info Transcription JUCE_INFO_FILE)
+        add_custom_command(OUTPUT "${transcription_generated}/Transcription_resources.rc"
+            APPEND DEPENDS "${transcription_info}" "${CMAKE_CURRENT_LIST_FILE}")
+    endif()
     target_sources(Transcription PRIVATE
         Source/Parameters.cpp Source/Parameters.h
         Source/PluginProcessor.cpp Source/PluginProcessor.h
